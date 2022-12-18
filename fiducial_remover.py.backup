@@ -1,0 +1,139 @@
+import argparse
+
+import imageio.plugins.feisem
+from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
+import os
+from torchvision.utils import save_image
+
+import torch
+from matplotlib import pyplot as plt
+from cnn_io import *
+from hough_utils import *
+# ------ arguments handling -------
+parser = argparse.ArgumentParser()
+parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
+parser.add_argument('--img_height', type=int, default=32, help='size of image height')
+parser.add_argument('--img_width', type=int, default=32, help='size of image width')
+parser.add_argument('--channel', type=int, default=3, help='number of image channel')
+args = parser.parse_args()
+os.makedirs('./test/', exist_ok=True)
+
+# ------ device handling -------
+cuda = True if torch.cuda.is_available() else False
+torch.cuda.set_device(0)
+if cuda:
+    device = 'cuda'
+else:
+    device = 'cpu'
+# Tensor type
+Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+
+# ------ Configure model -------
+# Initialize generator
+generator = getGenerator()
+generator.to(device)
+
+# ------ main process -------
+# manage input
+# transformer = [transforms.Resize((args.img_height, args.img_width), Image.BICUBIC),
+#                transforms.ToTensor(),
+#                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+transformer = [transforms.Resize((args.img_height, args.img_width), Image.BICUBIC),
+               transforms.ToTensor()]
+transformer2 = [transforms.Resize((args.img_height, args.img_width), Image.BICUBIC),
+               transforms.ToTensor()]
+
+
+img = Image.open('./data/151507_image.png')
+img_np = np.array(img)
+img_reserve = img_np.copy()
+image_transformer=transforms.Compose(transformer)
+# img = image_transformer(img)
+# img = torch.unsqueeze(img,dim=0)
+# img_var = Variable(img.type(Tensor))
+
+#------from model------#
+# mask_var = generator(img_var)
+# recover_var = getReconstructedImg(args.batch_size,args.channel,img_var,mask_var,img_np.shape[:2],device,Tensor,400)
+#------from file------#
+mask = Image.open('./data/151507_mask2.png')
+mask_np = np.array(mask)
+mask_transformer = transforms.Compose(transformer2)
+# mask = mask_transformer(mask)
+# mask_var = Variable(mask.type(Tensor))
+
+circles = np.loadtxt('./data/151507_mask3.png.txt')
+
+for i in range(circles.shape[0]):
+    print(i)
+    x = int(circles[i,0])
+    y = int(circles[i, 1])
+    crop_size=args.img_height
+    half = int(crop_size/2)
+    img_np_temp = img_np[y-half:y+half,x-half:x+half,:]
+    mask_np_temp = mask_np[y-half:y+half,x-half:x+half]
+
+
+    img_temp = image_transformer(Image.fromarray(img_np_temp))
+    img_temp = torch.unsqueeze(img_temp,dim=0)
+    img_var = Variable(img_temp.type(Tensor))
+
+    mask_temp = mask_transformer(Image.fromarray(mask_np_temp))
+    mask_temp = torch.unsqueeze(mask_temp,dim=0)
+    mask_var = Variable(mask_temp.type(Tensor))
+
+    recover_var = getReconstructedImg(args.batch_size, args.channel, img_var, mask_var, img_np_temp.shape[:2], device,
+                                      Tensor, 400)
+    recover_np = torch_to_np(recover_var)
+    recover_np = np.transpose(recover_np, (1, 2, 0))
+    f,a = plt.subplots(1,3)
+    a[0].imshow(img_np_temp)
+    a[1].imshow(255-mask_np_temp,cmap='gray')
+    a[2].imshow(recover_np)
+    plt.show()
+    img_reserve[y-half:y+half,x-half:x+half,:] = recover_np*255
+
+    plt.imshow(img_np)
+    plt.show()
+    # test = input()
+
+plt.imshow(img_reserve)
+plt.show()
+
+
+# test_sample= torch.cat((img_var.data, recover_var.data), -2)
+# save_image(test_sample, './test/%s_img.png' % i, normalize=True)
+# save_image(mask_var.data, './test/%s_mask.png' % i, normalize=True)
+# print('done')
+
+
+# #test single image
+# img = Image.open('../../../data/humanpilot/151507/spatial/tissue_hires_image.png')
+# img_np = np.array(img)
+# image_transformer=transforms.Compose(transformer)
+# img = image_transformer(img)
+# img = torch.unsqueeze(img,dim=0)
+# img_tensor = Variable(img.type(Tensor))
+# mask = generator(img_tensor)
+#
+# image_transformer2=transforms.Compose(transformer2)
+# mask = image_transformer2(mask)
+# # save_image(output.data, './test/151507_pix2.png', normalize=True)
+# mask = torch.squeeze(mask)
+# mask = mask.cpu().detach().numpy()
+#
+#
+# img_a = torch.squeeze(img)
+# img_a = img_a.numpy()
+# index = np.where(mask > -0.5)
+# x = index[0]
+# y = index[1]
+# max = img_a.max()
+#
+# for i,j in zip(x,y):
+#     img_a[:,i,j]=[max,max,max]
+#
+# img_a = np.transpose(img_a, (1, 2, 0))
+# plt.imshow(img_a)
+# plt.show()
