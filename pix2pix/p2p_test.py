@@ -11,12 +11,15 @@ import torch
 from matplotlib import pyplot as plt
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--epoch', type=int, default=600, help='epoch to start training from')
-parser.add_argument('--model_name', type=str, default="width2_with_negative_finetune_onlypixel",
+parser.add_argument('--epoch', type=int, default=800, help='epoch to start training from')
+# parser.add_argument('--model_name', type=str, default="width2_with_0.125negative_finetune+finetune_onlypixel",
+#                     help='name of the dataset')
+parser.add_argument('--model_name', type=str, default="all_auto_width2",
                     help='name of the dataset')
-parser.add_argument('--batch_size', type=int, default=8, help='size of the batches')
-parser.add_argument('--img_height', type=int, default=1936, help='size of image height')
-parser.add_argument('--img_width', type=int, default=2000, help='size of image width')
+parser.add_argument('--image_path', type=str, default='/media/huifang/data/fiducial/original_data/10x/CytAssist/CytAssist_11mm_FFPE_Human_Colorectal_Cancer_spatial/spatial/cytassist_image.tiff', help='path to image')
+parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
+parser.add_argument('--img_height', type=int, default=3600, help='size of image height')
+parser.add_argument('--img_width', type=int, default=3600, help='size of image width')
 args = parser.parse_args()
 
 save_dir = './test/%s/' % args.model_name
@@ -34,13 +37,12 @@ else:
 # Tensor type
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 # ------ Configure model -------
-# Initialize generator and discriminator
+# Initialize generator
 generator = Generator()
-discriminator = Discriminator()
-BASE_PATH = '/home/huifang/workspace/'
+# generator = Attention_Generator()
+BASE_PATH = '/media/huifang/data/'
 generator.load_state_dict(torch.load(BASE_PATH + 'experiment/pix2pix/saved_models/%s/g_%d.pth' % (args.model_name, args.epoch)))
 generator.to(device)
-discriminator.to(device)
 
 # ------ Configure data loaders -------
 # Configure dataloaders
@@ -62,13 +64,16 @@ test_samples = iter(test_dataloader)
 #     save_image(test_a.data, './test/%s/%s_img.png' % (args.model_name, i), nrow=4, normalize=True)
 #     save_image(output.data, './test/%s/%s_mask.png' % (args.model_name, i), nrow=4, normalize=True)
 
-img_a = Image.open('/home/huifang/workspace/data/fiducial_train/fiducial_12/spatial1/tissue_hires_image.png')
+img_a = Image.open(args.image_path)
+#img_a = Image.open('/home/huifang/workspace/data/fiducial_eval/eval/spatial6/tissue_hires_image.png')
+#img_a = Image.open('/home/huifang/workspace/data/fiducial_train/humanpilot/151507/spatial/tissue_hires_image.png')
+# img_a = Image.open('/home/huifang/workspace/data/fiducial_eval/eval/spatial7/tissue_hires_image.png')
 img_np = np.asarray(img_a)
 # img_a = Image.open('../../../data/humanpilot/151509/spatial/tissue_hires_image.png')
 image_transformer=transforms.Compose(transformer)
 img_a = image_transformer(img_a)
 img_a = torch.unsqueeze(img_a,dim=0)
-real_a = Variable(img_a.type(Tensor))
+real_a = torch.tensor(img_a.type(Tensor))
 output = generator(real_a)
 image_transformer2=transforms.Compose(transformer2)
 output = image_transformer2(output)

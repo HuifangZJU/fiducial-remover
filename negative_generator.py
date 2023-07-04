@@ -146,8 +146,8 @@ def get_edge_pixels(img):
 
     edges = cv2.dilate(edges, kernel_d, iterations=2)
 
-    #
-    edges = label(edges, neighbors=8, connectivity=3)
+
+    # edges = label(edges, neighbors=8)
     re = morphology.remove_small_objects(edges, min_size=30000)
     re = np.where(re > 0, 255, 0)
     re = re.astype(np.uint8)
@@ -201,39 +201,45 @@ def get_edge_pixels(img):
     # edges = cv2.Canny(thresh,1200,1200)
 
 
-    return re
+    return 255-re
 
 
 # ------------------------------------------
 #                data loading
 # ------------------------------------------
 
-root_path = '/home/huifang/workspace/data/fiducial_train/'
+root_path = '/home/huifang/workspace/data/fiducial_eval/'
 save_root = '/home/huifang/workspace/data/fiducial_crop_w2_aug'+str(augsize)+'_iter4/'
-dataset_names = ['mouse','humanpilot']
+#dataset_names = ['humanpilot','mouse']
+dataset_names = ['eval']
 
 for dataset_name in dataset_names:
     print('-------------'+dataset_name+'-------------')
     image_names= os.listdir(root_path+dataset_name)
     for image_name in image_names:
         print(image_name+'...')
-        tissue_image = read_image(root_path+dataset_name+'/' + image_name)
-        image = cv2.imread(root_path+dataset_name+'/' + image_name+'/masks/human_in_loop_mask_solid_result.png')
-        negatives = get_edge_pixels(image)
-        # f,a = plt.subplots(1,2)
-        # a[0].imshow(tissue_image)
-        # a[1].imshow(negatives)
-        # plt.show()
-        negative_position = np.where(negatives>0)
-        num_position = len(negative_position[0])
-        print(len(negative_position[0]))
-        mask = np.zeros(image.shape)
-        negative_save_path = save_root+dataset_name+'/' + image_name +'/negative/'
-        os.makedirs(negative_save_path,exist_ok=True)
+        tissue_image = plt.imread(root_path+dataset_name+'/' + image_name+'/tissue_hires_image.png')
+        image = cv2.imread(root_path+dataset_name+'/' + image_name+'/tissue_hires_image.png')
 
-        for id in range(0,num_position,10):
-            save_local_crop(tissue_image, mask, [negative_position[1][id],negative_position[0][id]],negative_save_path,iter_num=1,augmentation=False)
-        print('done')
+        tissue_image = plt.imread('/media/huifang/data/fiducial/data/11_STDS0000128_mice_liver_sc_analysi/tissue_hires_image11.png')
+        
+        image = cv2.imread('/media/huifang/data/fiducial/data/11_STDS0000128_mice_liver_sc_analysi/tissue_hires_image11.png')
+        negatives = get_edge_pixels(image)
+
+        f,a = plt.subplots(1,2)
+        a[0].imshow(tissue_image)
+        a[1].imshow(negatives,cmap='gray')
+        plt.show()
+        # negative_position = np.where(negatives>0)
+        # num_position = len(negative_position[0])
+        # print(len(negative_position[0]))
+        # mask = np.zeros(image.shape)
+        # negative_save_path = save_root+dataset_name+'/' + image_name +'/negative/'
+        # os.makedirs(negative_save_path,exist_ok=True)
+        #
+        # for id in range(0,num_position,10):
+        #     save_local_crop(tissue_image, mask, [negative_position[1][id],negative_position[0][id]],negative_save_path,iter_num=1,augmentation=False)
+        # print('done')
 
 #
 # save_file = '/home/huifang/workspace/data/imagelists/fiducial_width'+ str(circle_width)+'_all.txt'

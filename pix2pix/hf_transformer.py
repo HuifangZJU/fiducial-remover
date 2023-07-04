@@ -25,10 +25,10 @@ from utils import divide_batch_into_patches, reconstruct_batch_images
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
-parser.add_argument('--n_epochs', type=int, default=201, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=801, help='number of epochs of training')
 parser.add_argument('--pretrained_name', type=str, default="width2_downsample_nocondition_lamda10_with_0.125negative",
                     help='name of the dataset')
-parser.add_argument('--model_dir', type=str, default="all_auto_width2_attention_only_pixel_finetune", help='name of the dataset')
+parser.add_argument('--model_dir', type=str, default="transformer", help='name of the dataset')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--lr', type=float, default=0.0001, help='adam: learning rate')
 parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
@@ -67,40 +67,25 @@ else:
     device = 'cpu'
 
 # ------ Configure loss -------
-criterion_GAN = torch.nn.MSELoss()
-criterion_pixelwise = torch.nn.L1Loss()
-# Loss weight of L1 pixel-wise loss between translated image and real image
-lambda_pixel = 10
-
+criterion_binary = torch.nn.MSELoss()
 # ------ Configure model -------
-# Initialize generator and discriminator
+# Initialize generator
 generator = Attention_Generator()
-discriminator = Discriminator()
-if args.epoch != 0:
-    generator.load_state_dict(torch.load(model_save_path +'/%s/g_%d.pth' % (args.pretrained_name, args.epoch)))
-    discriminator.load_state_dict(torch.load(model_save_path +'/%s/d_%d.pth' % (args.pretrained_name, args.epoch)))
-else:
-    generator.apply(weights_init_normal)
-    partial_path = '/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'
-    saved_model = torch.load(partial_path)
-    generator_dict = generator.state_dict()
-    state_dict = {k: v for k, v in saved_model.items() if k in generator_dict.keys()}
-    generator_dict.update(state_dict)
-    generator.load_state_dict(generator_dict)
-    # discriminator.load_state_dict(
-    #     torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/d_400.pth'))
-    # discriminator.apply(weights_init_normal)
+generator.apply(weights_init_normal)
+partial_path = '/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'
+saved_model = torch.load(partial_path)
+generator_dict = generator.state_dict()
+state_dict = {k: v for k, v in saved_model.items() if k in generator_dict.keys()}
+generator_dict.update(state_dict)
+generator.load_state_dict(generator_dict)
 
 generator.to(device)
-discriminator.to(device)
-# Calculate output of image discriminator (PatchGAN)
-patch = (1, args.img_height // 2 ** 2, args.img_width // 2 ** 2)
-
 # ------ Configure optimizer -------
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-parameters_to_freeze = [generator.down1.parameters(), generator.down2.parameters(),generator.down3.parameters(),generator.down4.parameters(),generator.up1.parameters(), generator.up2.parameters(),generator.up3.parameters()]
-for param_group in optimizer_G.param_groups:
+optimizer = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+
+# ------ freeze pretrained parameters -------
+parameters_to_freeze = [generator.down1.parameters(), generator.down2.parameters(),generator.down3.parameters(),generator.down4.parameters()]
+for param_group in optimizer.param_groups:
     if param_group['params'] in parameters_to_freeze:
         for param in param_group['params']:
             param.requires_grad = False
@@ -119,22 +104,23 @@ transforms_gray = [transforms.Resize((args.img_height, args.img_width), Image.BI
 
 train_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb),
                               batch_size=args.batch_size, shuffle=True, num_workers=args.n_cpu)
-test_dataloader = DataLoader(ImageTestDataset(test_data_list, transforms_=transforms_rgb, ),
-                             batch_size=1, shuffle=True, num_workers=args.n_cpu)
+test_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb),
+                             batch_size=1, shuffle=False, num_workers=args.n_cpu)
 test_samples = cycle(test_dataloader)
 # Tensor type
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-
 def sample_images(epoch,batches_done):
     """Saves a generated sample from the validation set"""
     test_batch = next(test_samples)
-    test_a = test_batch['A']
-    real_a = Variable(test_a.type(Tensor))
-    output = generator(real_a)
+    test_image = test_batch['A'].to(device)
+    test_labels = test_batch['B'].to(device)
+    output = generator(test_image)
     # img_sample = torch.cat((test_a.data, output.data), -2)
-    save_image(test_a.data, image_save_path+'/%s/%s_%s_img.png' % (args.model_dir,epoch,batches_done), nrow=4, normalize=True)
-    save_image(output.data, image_save_path+'/%s/%s_%s_mask.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
+    save_image(test_image.data, image_save_path+'/%s/%s_%s_img.png' % (args.model_dir,epoch,batches_done), nrow=4, normalize=True)
+    save_image(test_labels.data, image_save_path+'/%s/%s_%s_gt.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
+    save_image(output.data, image_save_path + '/%s/%s_%s_mask.png' % (args.model_dir, epoch, batches_done), nrow=4,
+               normalize=True)
 
 
 # ------------------------------------------
@@ -145,50 +131,20 @@ logger = SummaryWriter(log_save_path)
 
 for epoch in range(args.epoch, args.n_epochs):
     for i, batch in enumerate(train_dataloader):
-        real_A = batch['A']
-        real_B = batch['B']
+        images = batch['A'].to(device)
+        labels = batch['B'].to(device)
+        # labels = labels.flatten(1)
         # Model inputs
-        real_A = Variable(real_A.type(Tensor))
-        real_B = Variable(real_B.type(Tensor))
-        fake_B = generator(real_A)
-
-        optimizer_G.zero_grad()
-        # GAN loss
-        valid = Variable(Tensor(np.ones((real_B.size(0), *patch))), requires_grad=False)
-        fake = Variable(Tensor(np.zeros((real_B.size(0), *patch))), requires_grad=False)
-        # pred_fake = discriminator(fake_B, real_A)
-        pred_fake = discriminator(fake_B)
-        loss_GAN = criterion_GAN(pred_fake, valid)
-        # Pixel-wise loss
-        loss_pixel = lambda_pixel * criterion_pixelwise(fake_B, real_B)
-        # Total loss
-        loss_G = loss_GAN + loss_pixel
+        # images = Variable(images.type(Tensor))
+        # labels = Variable(labels.type(Tensor))
+        predictions = generator(images)
+        optimizer.zero_grad()
+        # compute loss
+        loss = criterion_binary(predictions,labels)
         # loss_G = loss_pixel
-        loss_G.backward()
+        loss.backward()
 
-        optimizer_G.step()
-
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
-
-        optimizer_D.zero_grad()
-
-        # Real loss
-        # pred_real = discriminator(real_B, real_A)
-        pred_real = discriminator(real_B)
-        loss_real = criterion_GAN(pred_real, valid)
-
-        # Fake loss
-        # pred_fake = discriminator(fake_B.detach(), real_A)
-        pred_fake = discriminator(fake_B.detach())
-        loss_fake = criterion_GAN(pred_fake, fake)
-
-        # Total loss
-        loss_D = 0.5 * (loss_real + loss_fake)
-
-        loss_D.backward()
-        optimizer_D.step()
+        optimizer.step()
 
         # --------------
         #  Log Progress
@@ -201,33 +157,26 @@ for epoch in range(args.epoch, args.n_epochs):
 
         # Print log
         sys.stdout.write(
-            "\r" + args.model_dir + "---[Epoch %d/%d] [Batch %d/%d] [Loss G: %f] [Loss D: %f] ---[Loss GAN: %f  Loss pixel: %f]  ETA: %s" %
+            "\r" + args.model_dir + "---[Epoch %d/%d] [Batch %d/%d] [Loss: %f] ETA: %s" %
             (epoch, args.n_epochs,
              i, len(train_dataloader),
-             loss_G.item(), loss_D.item(), loss_GAN.item(),loss_pixel.item(), time_left))
+             loss.item(), time_left))
         # # If at sample interval save image
         if batches_done % args.sample_interval == 0:
             sample_images(epoch, batches_done)
         # --------------tensor board--------------------------------#
         if batches_done % 100 == 0:
-            info = {'loss_G': loss_G.item(), 'loss_D': loss_D.item()}
+            info = {'loss': loss.item()}
             for tag, value in info.items():
                 logger.add_scalar(tag, value, batches_done)
             for tag, value in generator.named_parameters():
                 tag = tag.replace('.', '/')
                 logger.add_histogram(tag, value.data.cpu().numpy(), batches_done)
                 # logger.add_histogram(tag+'grad', value.grad.data.cpu().numpy(),batches_done+1)
-            for tag, value in discriminator.named_parameters():
-                tag = tag.replace('.', '/')
-                logger.add_histogram(tag, value.data.cpu().numpy(), batches_done)
-                # logger.add_histogram(tag+'grad', value.grad.data.cpu().numpy(),batches_done+1)
 
     if args.checkpoint_interval != -1 and epoch % args.checkpoint_interval == 0:
-        # Save model checkpoints
         torch.save(generator.state_dict(), model_save_path+'/%s/g_%d.pth' % (args.model_dir,epoch))
-        torch.save(discriminator.state_dict(), model_save_path+'/%s/d_%d.pth' % (args.model_dir,epoch))
 
 # save final model
 torch.save(generator.state_dict(),  model_save_path+'/%s/g_%d.pth' % (args.model_dir,epoch))
-torch.save(discriminator.state_dict(),  model_save_path+'/%s/d_%d.pth' % (args.model_dir,epoch))
 logger.close()

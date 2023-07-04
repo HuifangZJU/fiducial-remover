@@ -14,7 +14,7 @@ from skimage.transform import (hough_line, hough_line_peaks,
                                probabilistic_hough_line)
 from skimage.feature import canny
 from skimage import data
-
+from skimage import morphology
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
@@ -132,7 +132,17 @@ def get_square_lines(img_height,img_width,points):
 
     # Classic straight-line Hough transform
     circle_image = circle_image.astype(np.uint8)
-    lines = cv2.HoughLines(circle_image, 1, np.pi / 180, 5)
+    scale = int(np.floor(points.shape[0]/1000))
+    if scale<1:
+        scale=1
+
+    lines=None
+    try:
+        while not lines:
+            lines = cv2.HoughLines(circle_image, 1, np.pi / 180, 5*scale)
+            scale = scale-1
+    except:
+        pass
     centery=[]
     centerx=[]
     for line in lines:
@@ -209,42 +219,46 @@ def get_square_lines(img_height,img_width,points):
     hor_lines_upper = np.unique(horizon_lines[hor_id_side0])
     hor_lines_lower = np.unique(horizon_lines[hor_id_side1])
 
-    return ver_lines_upper,ver_lines_lower,hor_lines_upper,hor_lines_lower
+    return ver_lines_upper.astype(int),ver_lines_lower.astype(int),hor_lines_upper.astype(int),hor_lines_lower.astype(int)
 
 def get_square_paras(img_height,img_width,circles,image):
     ver_lines_upper,ver_lines_lower,hor_lines_upper,hor_lines_lower = get_square_lines(img_height,img_width, circles)
     scale=[]
     framecenter_x=[]
     framecenter_y=[]
-    if ver_lines_upper and ver_lines_lower:
-        ver_min = np.min(ver_lines_upper)
-        ver_max = np.max(ver_lines_lower)
-        scale.append(ver_max-ver_min)
-        framecenter_x = int((ver_max + ver_min) / 2)
-    if hor_lines_lower and hor_lines_upper:
-        hor_min = np.min(hor_lines_upper)
-        hor_max = np.max(hor_lines_lower)
-        scale.append(hor_max - hor_min)
-        framecenter_y = int((hor_max + hor_min) / 2)
-
+    if len(ver_lines_upper)>0 and len(ver_lines_lower)>0:
+        vmin = np.min(ver_lines_upper)
+        vmax = np.max(ver_lines_lower)
+        scale.append(vmax-vmin)
+        framecenter_x = int((vmax + vmin) / 2)
+    if len(hor_lines_lower) and len(hor_lines_upper):
+        hmin = np.min(hor_lines_upper)
+        hmax = np.max(hor_lines_lower)
+        scale.append(hmax - hmin)
+        framecenter_y = int((hmax + hmin) / 2)
     if scale:
-        square_scale = np.mean(np.asarray(scale))
-    else:
-        square_scale=[]
-    LOCAL_DEBUG = False
-    if LOCAL_DEBUG:
-        for vmax in ver_lines_upper:
-            for vmin in ver_lines_lower:
-                for hmax in hor_lines_upper:
-                    for hmin in hor_lines_lower:
-                        cv2.line(image, (vmin, hmin), (vmax, hmin), (255, 0, 0), 2)
-                        cv2.line(image, (vmin, hmax), (vmax, hmax), (255, 0, 0), 2)
-                        cv2.line(image, (vmin, hmin), (vmin, hmax), (255, 0, 0), 2)
-                        cv2.line(image, (vmax, hmin), (vmax, hmax), (255, 0, 0), 2)
-        cv2.circle(image, (framecenter_x, framecenter_y), radius=10, color=(255, 0, 0), thickness=-1)
-        plt.imshow(image)
-        plt.show()
-    return framecenter_x,framecenter_y,square_scale
+        # square_scale = np.mean(np.asarray(scale))
+        LOCAL_DEBUG = True
+        if LOCAL_DEBUG:
+            output = image.copy()
+            cv2.line(output, (vmin, hmin), (vmax, hmin), (255, 0, 0), 2)
+            cv2.line(output, (vmin, hmax), (vmax, hmax), (255, 0, 0), 2)
+            cv2.line(output, (vmin, hmin), (vmin, hmax), (255, 0, 0), 2)
+            cv2.line(output, (vmax, hmin), (vmax, hmax), (255, 0, 0), 2)
+            for vmax in ver_lines_upper:
+                for vmin in ver_lines_lower:
+                    for hmax in hor_lines_upper:
+                        for hmin in hor_lines_lower:
+                            cv2.line(output, (vmin, hmin), (vmax, hmin), (255, 0, 0), 2)
+                            cv2.line(output, (vmin, hmax), (vmax, hmax), (255, 0, 0), 2)
+                            cv2.line(output, (vmin, hmin), (vmin, hmax), (255, 0, 0), 2)
+                            cv2.line(output, (vmax, hmin), (vmax, hmax), (255, 0, 0), 2)
+            cv2.circle(output, (framecenter_x, framecenter_y), radius=10, color=(255, 0, 0), thickness=-1)
+            plt.imshow(output)
+            plt.show()
+
+    return framecenter_x,framecenter_y,scale
+
 # @jit
 def maxpooling_in_position(image,position,kernel_size):
     height, width = image.shape
@@ -293,11 +307,52 @@ def getEdgedImg(blur_image,style):
         edged_image= blur_image.filter(ImageFilter.FIND_EDGES)
     return np.asarray(edged_image)
 
-def run_circle_threhold(original_image,_radius_,circle_threshold,step=2):
-    # Gaussian Blurring of Gray Image
-    original_image = normalize_array(original_image)
-    blur_image=getBluredImg(original_image)
-    edged_image = getEdgedImg(blur_image,"canny")
+
+def get_edge_pixels(img):
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    gray = cv2.bilateralFilter(gray, 9, 75, 75)
+    _, thresh = cv2.threshold(gray, np.mean(gray), 255, cv2.THRESH_BINARY_INV)
+    edges = cv2.Canny(thresh, 1000, 1000)
+
+    kernel_d = np.ones((3, 3), dtype=np.uint8)
+    kernel_d[0,0]=0
+    kernel_d[0,2]=0
+    kernel_d[2,0]=0
+    kernel_d[2,2]=0
+
+    edges_temp = cv2.erode(edges,kernel_d,iterations=1)
+    edges = edges - edges_temp
+
+
+    edges = cv2.dilate(edges, kernel_d, iterations=2)
+
+
+    # edges = label(edges, neighbors=8)
+    re = morphology.remove_small_objects(edges, min_size=30000)
+    re = np.where(re > 0, 255, 0)
+    re = re.astype(np.uint8)
+
+    edges = cv2.erode(re, kernel_d, iterations=2)
+    edges_temp = cv2.erode(edges, kernel_d, iterations=1)
+    re = edges - edges_temp
+
+    return re
+
+
+def run_circle_threhold(original_image,_radius_,circle_threshold,edgemethod="canny",step=3):
+    if edgemethod == 'self':
+        edged_image = get_edge_pixels(original_image)
+        plt.imshow(edged_image)
+        plt.show()
+    # # Gaussian Blurring of Gray Image
+    else:
+        original_image = normalize_array(original_image)
+        blur_image=getBluredImg(original_image)
+        edged_image = getEdgedImg(blur_image,"canny")
+        plt.imshow(edged_image)
+        plt.show()
+
 
     edges = np.where(edged_image == 255)
     height, width = edged_image.shape
@@ -394,15 +449,17 @@ def run_circle_max(crop_image,radius,max_n,step=1):
 
 
     LOCAL_DEBUG = False
+    # LOCAL_DEBUG = True
     if LOCAL_DEBUG:
         image_show = crop_image.copy()
         f, axarr = plt.subplots(2, 2)
         axarr[0, 0].imshow(image_show)
         axarr[0, 1].imshow(crop_image)
         axarr[1, 0].imshow(candidate_centers)
-        cv2.circle(image_show, (circles[0, 0], circles[0, 1]),circles[0,2], (0, 0, 250), 1)
+        cv2.circle(image_show, (circles[0, 0], circles[0, 1]),circles[0,2], (250, 0, 0), 1)
         axarr[1, 1].imshow(image_show)
         print(circles[0, 0],circles[0, 1],circles[0,2])
+        print(max_value)
         plt.show()
     return circles[0], max_value
 
@@ -428,7 +485,7 @@ def get_transposed_fiducials(circles,circles_f,iter=1):
     transposed_circle = icp.apply_icp_transformation(circles_f, transform)
     return transposed_circle.astype(int)
 
-def find_nearest_points(src,dst):
+def find_nearest_points(src,dst,is_same=False):
     dst_array = np.repeat(dst[:, :, np.newaxis], src.shape[0], axis=2)
     src_array = np.repeat(src[:, :, np.newaxis], dst.shape[0], axis=2)
     src_array = np.transpose(src_array, [2, 1, 0])
@@ -436,6 +493,10 @@ def find_nearest_points(src,dst):
     distance = np.power((dst_array - src_array), 2)
     distance = distance[:, 0, :] + distance[:, 1, :]
     distance = np.sqrt(distance)
+    if is_same:
+        maxvalue = np.max(distance)
+        for i in range(distance.shape[0]):
+            distance[i,i]=maxvalue
     indices = np.argmin(distance, axis=1)
     distance = np.min(distance,axis=1)
     return indices, distance

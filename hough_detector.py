@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from hough_utils import *
-import get_template_para
+import fiducial_utils
 from fiducial_utils import read_tissue_image as read_image
 
 H_RADIUS = 9
@@ -22,12 +22,12 @@ def run(imagepath,dataset_name,circle_likelihood=None,shrink=0.87):
     if os.path.exists(imagepath + dataset_name+'/aligned_fiducials.jpg') or os.path.exists(imagepath + dataset_name+'/spatial/aligned_fiducials.jpg'):
         print('Using user provided fiducials.')
         try:
-            transposed_fiducial = get_template_para.runCircle(imagepath + dataset_name+'/aligned_fiducials.jpg')
+            transposed_fiducial = fiducial_utils.runCircle(imagepath + dataset_name+'/aligned_fiducials.jpg')
         except:
-            transposed_fiducial = get_template_para.runCircle(imagepath + dataset_name+ '/spatial/aligned_fiducials.jpg')
+            transposed_fiducial = fiducial_utils.runCircle(imagepath + dataset_name+ '/spatial/aligned_fiducials.jpg')
     else:
         print('Using mouse fiducials.')
-        circles_f, fiducialcenter_x, fiducialcenter_y, fiducial_scale = get_template_para.mouse_para()
+        circles_f, fiducialcenter_x, fiducialcenter_y, fiducial_scale = fiducial_utils.mouse_para()
         if shrink>0:
             print('Use user provided scale ' + str(shrink)+'.')
             circles_f[:, :2] = circles_f[:, :2] * shrink
@@ -77,7 +77,7 @@ def run(imagepath,dataset_name,circle_likelihood=None,shrink=0.87):
 root_path = '/home/huifang/workspace/data/fiducial_train/'
 dataset_names = os.listdir(root_path)
 for dataset_name in dataset_names:
-    # dataset_name = 'mouse'
+    dataset_name = 'mouse'
     print('-------------'+dataset_name+'-------------')
     temp = dataset_name.split('_')
     if len(temp)>1:
@@ -86,7 +86,7 @@ for dataset_name in dataset_names:
         he_radius = H_RADIUS
     image_names= os.listdir(root_path+dataset_name)
     for image_name in image_names:
-        # image_name='spatial4'
+        image_name='posterior_v1'
         print(image_name+'...')
         ##### run single image #####
         image, detected_circles = run(root_path + dataset_name + '/', image_name, circle_likelihood=10)
@@ -109,8 +109,9 @@ for dataset_name in dataset_names:
         # save_mask_to_file(mask, detected_circles, save_path + 'hough_mask_w2', 2)
         # print('done')
         #####Visualization#####
+        mask = np.ones(image.shape[:2])
         for circle in detected_circles:
-            cv2.circle(image, (circle[0], circle[1]), circle[2], 1, 1)
-        plt.imshow(image)
+            cv2.circle(mask, (circle[0], circle[1]), circle[2], 0, 2)
+        plt.imshow(mask,cmap='gray')
         plt.show()
 
