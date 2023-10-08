@@ -125,7 +125,7 @@ def fill_noise(x, noise_type):
     else:
         assert False
 
-def get_noise(bs, input_depth, method, spatial_size, noise_type='u', var=1./10):
+def get_noise(input_depth, method, spatial_size, noise_type='u', var=1./10):
     """Returns a pytorch.Tensor of size (1 x `input_depth` x `spatial_size[0]` x `spatial_size[1]`) 
     initialized in a specific way.
     Args:
@@ -138,7 +138,7 @@ def get_noise(bs, input_depth, method, spatial_size, noise_type='u', var=1./10):
     if isinstance(spatial_size, int):
         spatial_size = (spatial_size, spatial_size)
     if method == 'noise':
-        shape = [bs, input_depth, spatial_size[0], spatial_size[1]]
+        shape = [1, input_depth, spatial_size[0], spatial_size[1]]
         net_input = torch.zeros(shape)
         
         fill_noise(net_input, noise_type)

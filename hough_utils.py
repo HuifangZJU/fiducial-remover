@@ -343,15 +343,15 @@ def get_edge_pixels(img):
 def run_circle_threhold(original_image,_radius_,circle_threshold,edgemethod="canny",step=3):
     if edgemethod == 'self':
         edged_image = get_edge_pixels(original_image)
-        plt.imshow(edged_image)
-        plt.show()
+        # plt.imshow(edged_image)
+        # plt.show()
     # # Gaussian Blurring of Gray Image
     else:
         original_image = normalize_array(original_image)
         blur_image=getBluredImg(original_image)
         edged_image = getEdgedImg(blur_image,"canny")
-        plt.imshow(edged_image)
-        plt.show()
+        # plt.imshow(edged_image)
+        # plt.show()
 
 
     edges = np.where(edged_image == 255)

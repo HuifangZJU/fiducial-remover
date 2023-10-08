@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils import trunc_normal_
+from .utils import trunc_normal_
 import math
 
 def weights_init_normal(m):
@@ -50,6 +50,21 @@ class UNetUp(nn.Module):
         x = self.model(x)
         x = torch.cat((x, skip_input), 1)
 
+        return x
+
+class UNetUpNoSkip(nn.Module):
+    def __init__(self, in_size, out_size, dropout=0.0):
+        super(UNetUpNoSkip, self).__init__()
+        layers = [  nn.ConvTranspose2d(in_size, out_size, 4, 2, 1, bias=False),
+                    nn.InstanceNorm2d(out_size),
+                    nn.ReLU(inplace=True)]
+        if dropout:
+            layers.append(nn.Dropout(dropout))
+
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = self.model(x)
         return x
 
 
@@ -186,14 +201,15 @@ def reconstruct_batch_images(patches, image_size):
 
     return reconstructed_images
 
+
 class Attention_Generator(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, patch_size=32):
         super(Attention_Generator, self).__init__()
         self.pos_embed = nn.Parameter(torch.zeros(1, 4096, 256))
         self.blocks = nn.ModuleList([
             Block(
-                dim=256, num_heads=16)
-            for i in range(2)])
+                dim=256, num_heads=4)
+            for i in range(5)])
         self.norm = nn.LayerNorm(256)
         self.patch_size = patch_size
 
@@ -270,14 +286,17 @@ class Attention_Generator(nn.Module):
         d3 = self.down3(d2)
         d4 = self.down4(d3)
         d4_flatten = d4.flatten(1).unsqueeze(0)
-        d4_flatten_with_pe = d4_flatten + pos_embed
+
+        d4_flatten_with_pe = d4_flatten + 5*pos_embed
         for blk in self.blocks:
             d4_flatten_with_pe = blk(d4_flatten_with_pe)
         d4_flatten_with_pe = self.norm(d4_flatten_with_pe)
+
         y = self.head(d4_flatten_with_pe)
         num_patches_w = w // self.patch_size
         num_patches_h = h // self.patch_size
         y = y.view(1,num_patches_w,num_patches_h)
+
         # d4_attention = d4_flatten_with_pe.squeeze().view(d4.shape)
         # u1 = self.up1(d4_attention, d3)
         # # u1 = self.up1(d4, d3)
@@ -289,8 +308,104 @@ class Attention_Generator(nn.Module):
         return y
 
 
-##############################
-#           Generators
+
+class Dot_Generator(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, patch_size=4):
+        super(Dot_Generator, self).__init__()
+        self.pos_embed = nn.Parameter(torch.zeros(1, 4096, 32))
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=32, num_heads=4)
+            for _ in range(6)])
+        self.norm = nn.LayerNorm(32)
+        self.patch_size = patch_size
+
+        self.down1 = UNetDown(in_channels, 4, normalize=False)
+        self.down2 = UNetDown(4, 8, dropout=0.5)
+        self.down3 = UNetDown(8, 16, dropout=0.5)
+        self.down4 = UNetDown(16, 32, normalize=False, dropout=0.5)
+        self.down5 = UNetDown(32, 32, normalize=False, dropout=0.5)
+
+        #self.up1 = UNetUp(32, 32, dropout=0.5)
+        #self.up2 = UNetUp(64, 16, dropout=0.5)
+        #self.up3 = UNetUp(32, 8, dropout=0.5)
+        #self.up4 = UNetUp(16, 4)
+        self.up1 = UNetUpNoSkip(32, 32, dropout=0.5)
+        self.up2 = UNetUpNoSkip(32, 16, dropout=0.5)
+        self.up3 = UNetUpNoSkip(16, 8, dropout=0.5)
+        self.up4 = UNetUpNoSkip(8, 4)
+
+
+        # self.down1 = UNetDown(in_channels, 16, normalize=False)
+        # self.down2 = UNetDown(16, 32, dropout=0.5)
+        # self.down3 = UNetDown(32, 64, dropout=0.5)
+        # self.down4 = UNetDown(64, 64, normalize=False, dropout=0.5)
+        #
+        # self.up1 = UNetUp(64, 64, dropout=0.5)
+        # self.up2 = UNetUp(128, 32, dropout=0.5)
+        # self.up3 = UNetUp(64, 16)
+
+        self.head = nn.Linear(32, 1)
+
+        self.final = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.ZeroPad2d((1, 0, 1, 0)),
+            nn.Conv2d(4, out_channels, 4, padding=1),
+            nn.Sigmoid()
+            #nn.Tanh()
+        )
+
+        # self.apply(self._init_weights)
+
+    def interpolate_pos_encoding(self, patches, w, h):
+
+        npatch = patches.shape[-2]*patches.shape[-1]
+        N = self.pos_embed.shape[1]
+        if npatch == N and w == h:
+            return self.pos_embed
+
+        patch_pos_embed = self.pos_embed
+        dim = patch_pos_embed.shape[-1]
+        w0 = patches.shape[-2]
+        h0 = patches.shape[-1]
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            scale_factor=(w0/math.sqrt(N), h0 /math.sqrt(N)),
+            mode='bicubic',
+        )
+        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return  patch_pos_embed
+
+
+    def forward(self, x):
+        B, nc, w, h = x.shape
+        d1 = self.down1(x)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+        d5 = self.down5(d4)
+
+
+        pos_embed = self.interpolate_pos_encoding(d5,w,h)
+        d5_flatten = d5.flatten(2).transpose(1,2)
+        d5_flatten_with_pe = d5_flatten + 5*pos_embed
+        for blk in self.blocks:
+            d5_flatten_with_pe = blk(d5_flatten_with_pe)
+        d5_flatten_with_pe = self.norm(d5_flatten_with_pe)
+
+        d5_attention = d5_flatten_with_pe.transpose(1,2).squeeze().view(d5.shape)
+        #u1 = self.up1(d5_attention, d4)
+        #u2 = self.up2(u1, d3)
+        #u3 = self.up3(u2, d2)
+        #u4 = self.up4(u3, d1)
+        u1 = self.up1(d5_attention)
+        u2 = self.up2(u1)
+        u3 = self.up3(u2)
+        u4 = self.up4(u3)
+        final = self.final(u4)
+        return final
+
 ##############################
 
 class Generator(nn.Module):
@@ -314,13 +429,10 @@ class Generator(nn.Module):
 
     def forward(self, x):
         # U-Net generator with skip connections from encoder to decoder
-        print(x.shape)
         d1 = self.down1(x)
         d2 = self.down2(d1)
         d3 = self.down3(d2)
         d4 = self.down4(d3)
-        print(d4.shape)
-        test = input()
         u1 = self.up1(d4, d3)
         u2 = self.up2(u1, d2)
         u3 = self.up3(u2, d1)
