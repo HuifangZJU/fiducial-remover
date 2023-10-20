@@ -9,11 +9,14 @@ import torch
 import torch.optim
 from dip.utils.inpainting_utils import *
 import seaborn as sns
+from saicinpainting.training.trainers.default import DefaultInpaintingTrainingModule
 
 BASE_PATH = '/home/huifang/workspace/'
 def get_circle_Generator():
     generator = Generator()
     generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_with_0.125negative_finetune+finetune_onlypixel/g_800.pth'))
+    # generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'))
+
     # generator = Dot_Generator()
     # generator.load_state_dict(torch.load(
     #     '/media/huifang/data/experiment/pix2pix/saved_models/transformer-dot-sigmoid-mse-5pe-noskip/g_800.pth'))
@@ -137,7 +140,16 @@ def getReconstructedImg(img_var, mask_var, device,Tensor,num_iter=400):
     return recover_var
 
 
+def getLamaInpainter(train_config, path, map_location='cuda', strict=True):
+    kwargs = dict(train_config.training_model)
+    kwargs.pop('kind')
+    kwargs['use_ddp'] = train_config.trainer.kwargs.get('accelerator', None) == 'ddp'
+    model = DefaultInpaintingTrainingModule(train_config, **kwargs)
 
+    state = torch.load(path, map_location=map_location)
+    model.load_state_dict(state['state_dict'], strict=strict)
+    model.on_load_checkpoint(state)
+    return model
 
 
 

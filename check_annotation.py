@@ -12,7 +12,6 @@ import math
 import random
 # SAVE_ROOT = '/media/huifang/data/fiducial/annotation/'
 SAVE_ROOT = '/media/huifang/data/fiducial/Fiducial_colab/Fiducial_colab/'
-
 def get_annotated_circles(annotation_path):
     in_tissue_path = os.path.join(annotation_path, 'in_tissue')
     in_tissue_circle = [circle for circle in os.listdir(in_tissue_path) if circle.endswith('image.png')]
@@ -26,8 +25,8 @@ def get_annotated_circles(annotation_path):
 
 def plot_circles_in_image(image,in_tissue_circles,out_tissue_circles, width):
 
-    for circle in in_tissue_circles:
-        cv2.circle(image, (circle[0],circle[1]), circle[2],[255,0,0], width)
+    # for circle in in_tissue_circles:
+    #     cv2.circle(image, (circle[0],circle[1]), circle[2],[255,0,0], width)
 
     for circle in out_tissue_circles:
 
@@ -133,16 +132,38 @@ def annotate_patches(image_size, patch_size, circles):
                     # plt.show()
                     break
     # filling holes
-    kernel = np.ones((3, 3))
+    # kernel = np.ones((3, 3))
+    kernel = np.array([[0, 1, 0],
+                       [1, 1, 1],
+                       [0, 1, 0]])
     neighbor_count = convolve2d(annotation, kernel, mode='same')
-    holes = np.logical_and(annotation == 0, neighbor_count > 4)
+    holes = np.logical_and(annotation == 0, neighbor_count > 2)
     while np.sum(holes)>0:
         annotation= np.logical_or(annotation,holes)
         neighbor_count = convolve2d(annotation, kernel, mode='same')
-        holes = np.logical_and(annotation == 0, neighbor_count > 4)
+        holes = np.logical_and(annotation == 0, neighbor_count > 2)
     # neighbor_count = convolve2d(annotation, kernel, mode='same')
     return annotation
 
+
+def get_circles_from_annotation_path(image_name):
+    annotation_path = get_annotation_path(image_name)
+    # if not os.path.exists(annotation_path):
+    #     continue
+    in_tissue_circles, out_tissue_circles = get_annotated_circles(annotation_path)
+    if len(unique_pairs_below_threshold(in_tissue_circles, 10)) > 0:
+        in_tissue_circles = remove_overlapping_circles(in_tissue_circles, 10)
+    if len(unique_pairs_below_threshold(out_tissue_circles, 10)) > 0:
+        out_tissue_circles = remove_overlapping_circles(out_tissue_circles, 10)
+    circles = in_tissue_circles + out_tissue_circles
+    # np.save(image_name.split('.')[0] + '.npy', circles)
+    return in_tissue_circles,out_tissue_circles,circles
+
+def get_circles_from_file(image_name):
+    circles = np.load(image_name.split('.')[0]+'.npy')
+    in_tissue_circles = [circle for circle in circles if circle[-1] == 1]
+    out_tissue_circles = [circle for circle in circles if circle[-1] == 0]
+    return in_tissue_circles,out_tissue_circles,circles
 
 def annotate_continuous_patches(image_size, patch_size, circles):
 
@@ -222,42 +243,23 @@ for i in range(0,len(fiducial_images)):
 
     print(str(len(fiducial_images))+'---'+str(i))
     image = plt.imread(image_name)
-    # plt.imshow(image)
-    # plt.show()
-    # image = image*255
-    # image = np.array(image,dtype=np.uint8)
-    # file_name = f"{i}.png"
-    # plt.imsave('./temp/'+file_name,image)
-    # show_grids(image,64)
-
-    annotation_path = get_annotation_path(image_name)
-    if not os.path.exists(annotation_path):
-        continue
     print(image_name)
-    in_tissue_circles, out_tissue_circles = get_annotated_circles(annotation_path)
-    # #
-    if len(unique_pairs_below_threshold(in_tissue_circles, 10))>0:
-        in_tissue_circles = remove_overlapping_circles(in_tissue_circles, 10)
-    if len(unique_pairs_below_threshold(out_tissue_circles, 10))>0:
-        out_tissue_circles = remove_overlapping_circles(out_tissue_circles, 10)
-    circles = in_tissue_circles + out_tissue_circles
 
-    # print(unique_pairs_below_threshold(in_tissue_circles, 10))
-    # print(len(unique_pairs_below_threshold(out_tissue_circles, 10)))
-    print(len(circles))
 
-    # np.save(annotation_path+'/circles.npy',circles)
+    # in_tissue_circles,out_tissue_circles,circles = get_circles_from_annotation_path(image_name)
+    in_tissue_circles, out_tissue_circles, circles = get_circles_from_file(image_name)
 
-    #
-    # patches = annotate_patches(image.shape[:2], patch_size,circles)
-    # annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
-    annotation_image = annotate_continuous_patches(image.shape[:2], 32,circles)
+
+    # Visualization
+    patches = annotate_patches(image.shape[:2], patch_size,circles)
+    annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
+    continuous_patch = annotate_continuous_patches(image.shape[:2], 32,circles)
     image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,width)
     f,a = plt.subplots(1,2,figsize=(16, 8))
     # plt.figure(figsize=(8, 8))
     a[0].imshow(image)
     a[0].imshow(annotation_image, cmap='binary', alpha=0.5)
-    a[1].imshow(annotation_image)
+    a[1].imshow(continuous_patch)
     plt.show()
 
 

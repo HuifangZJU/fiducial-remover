@@ -440,15 +440,6 @@ class Generator(nn.Module):
         return self.final(u3)
 
 
-
-
-
-
-
-
-
-
-
 ##############################
 #        Discriminator
 ##############################
