@@ -2,7 +2,7 @@ from __future__ import division
 import os.path
 import random
 import matplotlib.pyplot as plt
-
+import itertools
 from hough_utils import *
 from fiducial_utils import read_tissue_image as read_image
 
@@ -44,10 +44,6 @@ def write_to_file(image_root_path,save_file,downsample_rate,save_in_tissue=True,
         write_image_in_dir_to_file(temp_path,f,downsample_rate,save_in_tissue,save_out_tissue)
 
 
-
-
-
-
 def save_local_crop(image,mask,circle,path,iter_num=1,augmentation=True):
 
     for i in range(iter_num):
@@ -72,34 +68,58 @@ def save_local_crop(image,mask,circle,path,iter_num=1,augmentation=True):
 # ------------------------------------------
 #                data loading
 # ------------------------------------------
+negative_coordinates = './negative_coordinates.txt'
+fn = open(negative_coordinates,'r')
+negative_limits = fn.readlines()
+for i in range(len(negative_limits)):
+    negative_limits[i] = negative_limits[i].rstrip('\n')
+    negative_limits[i] = negative_limits[i].split(' ')[1:5]
+    negative_limits[i]=[int(x) for x in negative_limits[i]]
 
-root_path = '/home/huifang/workspace/data/fiducial_train/'
-save_root = '/home/huifang/workspace/data/fiducial_crop_w2_aug'+str(augsize)+'_iter4/'
-dataset_names = os.listdir(root_path)
-in_tissue_all=0
-out_tissue_all=0
-for dataset_name in dataset_names:
-    print('-------------'+dataset_name+'-------------')
-    image_names= os.listdir(root_path+dataset_name)
-    for image_name in image_names:
-        print(image_name+'...')
-        image = read_image(root_path+dataset_name+'/' + image_name)
-        circles = np.load(root_path+dataset_name+'/' + image_name+'/masks/human_in_loop_mask.npy')
-        mask = generate_mask(image.shape[:2],circles,circle_width)
-        in_tissue = np.where(circles[:,-1]==1)
-        out_tissue = np.where(circles[:,-1]==0)
 
-        in_tissue_save_path = save_root+dataset_name+'/' + image_name +'/in_tissue/'
-        out_tissue_save_path = save_root + dataset_name + '/' + image_name + '/out_tissue/'
-        os.makedirs(in_tissue_save_path,exist_ok=True)
-        os.makedirs(out_tissue_save_path,exist_ok=True)
+source_images = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+f = open(source_images, 'r')
+fiducial_images = f.readlines()
+in_tissue_list = []
+out_tissue_list = []
+negative_list = []
+for i in range(0,len(fiducial_images)):
+    image_name = fiducial_images[i].split(' ')[0]
+    group_id = fiducial_images[i].split(' ')[-1]
+    # print(image_name+'...')
+    image_name = image_name.rstrip('\n')
+    circles = np.load(image_name.split('.')[0] + '.npy')
+    in_tissue = np.where(circles[:,-1]==1)
+    out_tissue = np.where(circles[:,-1]==0)
 
-        for id in in_tissue[0]:
-            save_local_crop(image, mask, circles[id,:],in_tissue_save_path,iter_num=4)
-        for id in out_tissue[0]:
-            save_local_crop(image, mask, circles[id, :], out_tissue_save_path,iter_num=4)
-        print('done')
-        in_tissue_all += len(in_tissue[0])
-        out_tissue_all += len(out_tissue[0])
-print(in_tissue_all)
-print(out_tissue_all)
+    negative_xmin,negative_ymin,negative_xmax,negative_ymax = negative_limits[i]
+    # mask_name = image_name.split('.')[0] + '_mask_width2.png'
+    # mask_name = image_name.split('.')[0] + '_mask_solid.png'
+    for id in in_tissue[0]:
+        circle = circles[id, :]
+        line = image_name + ' ' + str(circle[0]) + ' ' + str(circle[1]) + ' ' + group_id
+        in_tissue_list.append(line)
+        #keep negative the same number as in_tissue case
+        xc = random.randint(negative_xmin,negative_xmax)
+        yc = random.randint(negative_ymin,negative_ymax)
+        line = image_name + ' ' + str(xc) + ' ' + str(yc) + ' ' + group_id
+        negative_list.append(line)
+
+
+    for id in out_tissue[0]:
+        circle = circles[id, :]
+        line = image_name + ' ' + str(circle[0]) + ' ' + str(circle[1]) + ' ' + group_id
+        out_tissue_list.append(line)
+
+
+
+target_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_circles_downsample_with_negative_final.txt'
+f = open(target_image_path,'w')
+for line in in_tissue_list:
+    f.write(f"{line}")
+for i in range(0, len(out_tissue_list), 10):
+    f.write(f"{out_tissue_list[i]}")
+for line in negative_list:
+    f.write(f"{line}")
+print('done')
+

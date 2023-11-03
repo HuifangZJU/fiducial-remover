@@ -394,7 +394,7 @@ transforms_rgb = transforms.Compose([transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 
-test_image_path = '/home/huifang/workspace/data/imagelists/st_image_trainable_temp_fiducial.txt'
+test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
 f = open(test_image_path, 'r')
 files = f.readlines()
 f.close()

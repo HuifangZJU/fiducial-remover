@@ -220,47 +220,111 @@ def get_annotation_path(imagepath):
     data_path = SAVE_ROOT + dataset + '_' + index
     return data_path
 
+def plot_pie_chart(numbers):
+    # Calculate annotation percentages by dividing each number by 555
+    percentages = [(num / 555) * 100 for num in numbers]
 
-source_images = '/home/huifang/workspace/data/imagelists/st_image_trainable_fiducial.txt'
+    # Initialize counters for different percentage ranges
+    percent_100 = 0
+    percent_90_100 = 0
+    percent_80_90 = 0
+    percent_70_80 = 0
+    percent_below_70 = 0
+
+    # Categorize percentages into different ranges
+    for percent in percentages:
+        if percent == 100:
+            percent_100 += 1
+        elif 95 <= percent < 100:
+            percent_90_100 += 1
+        elif 85 <= percent < 95:
+            percent_80_90 += 1
+        elif 70 <= percent < 85:
+            percent_70_80 += 1
+        else:
+            percent_below_70 += 1
+
+    # Create data for the pie chart
+    labels = ['No deficiency', '0-5%', '5%-15%', '15%-30%', 'More than 30%']
+    sizes = [percent_100, percent_90_100, percent_80_90, percent_70_80, percent_below_70]
+    colors = ['gold', 'yellowgreen', 'lightcoral', 'lightskyblue', 'lightpink']
+    explode = (0.1, 0, 0, 0, 0)  # Explode the 1st slice (100%)
+
+    # Create the pie chart
+    plt.pie(sizes, explode=explode, labels=labels, colors=colors, autopct='%1.1f%%', shadow=False, startangle=140)
+    # Draw a circle in the center of the pie chart (optional)
+    # centre_circle = plt.Circle((0, 0), 0.30, fc='white')
+    # fig = plt.gcf()
+    # fig.gca().add_artist(centre_circle)
+
+    # Set the title above the pie chart
+    plt.title("Distribution of Annotation Deficiency", y=1.08)
+
+    # Equal aspect ratio ensures that pie is drawn as a circle
+    plt.axis('equal')
+
+    # Show the pie chart
+    plt.show()
+
+
+
+source_images = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
 f = open(source_images, 'r')
 fiducial_images = f.readlines()
 SAVE_FILE = False
 if SAVE_FILE:
-    imagelist_path = '/home/huifang/workspace/data/imagelists/fiducial_auto_width2.txt'
+    imagelist_path = '/home/huifang/workspace/data/imagelists/st_upsample_trainable_images_final.txt'
     f_list = open(imagelist_path,'w')
 
 width = 2
 patch_size = 32
-# badfile=[109,113,114,116,119,129,131,132,136,137,138,144,152,153,154,160,161,162,163,164,165]
-# temp_image_list = '/home/huifang/workspace/data/imagelists/st_image_temp_trainable_fiducial.txt'
-# f_temp = open(temp_image_list,'w')
+in_cnt=0
+out_cnt=0
 for i in range(0,len(fiducial_images)):
     # if i in badfile:
     #     continue
+
     image_name = fiducial_images[i].split(' ')[0]
+    groupid = fiducial_images[i].split(' ')[2]
     image_name = image_name.rstrip('\n')
     # f_temp.write(image_name)
 
     print(str(len(fiducial_images))+'---'+str(i))
     image = plt.imread(image_name)
-    print(image_name)
+
 
 
     # in_tissue_circles,out_tissue_circles,circles = get_circles_from_annotation_path(image_name)
     in_tissue_circles, out_tissue_circles, circles = get_circles_from_file(image_name)
+    in_tissue_percentage = len(in_tissue_circles)/len(circles)
 
+    times = max(int(in_tissue_percentage*20),1)
+    for _ in range(times):
+        f_list.write(fiducial_images[i])
+
+
+
+    # mask = generate_mask(image.shape[:2], circles, -1)
+    # sum = np.sum(mask)
+    # print(sum/(mask.shape[0]*mask.shape[1]))
+    # test = input()
+    # mask = generate_weighted_mask(image.shape[:2], in_tissue_circles,out_tissue_circles,2)
+    # plt.imshow(mask)
+    # plt.show()
+
+    # save_image(mask, image_name.split('.')[0] + '_mask_solid.png', format="L")
 
     # Visualization
-    patches = annotate_patches(image.shape[:2], patch_size,circles)
-    annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
-    continuous_patch = annotate_continuous_patches(image.shape[:2], 32,circles)
-    image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,width)
-    f,a = plt.subplots(1,2,figsize=(16, 8))
-    # plt.figure(figsize=(8, 8))
-    a[0].imshow(image)
-    a[0].imshow(annotation_image, cmap='binary', alpha=0.5)
-    a[1].imshow(continuous_patch)
-    plt.show()
+    # patches = annotate_patches(image.shape[:2], patch_size,circles)
+    # annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
+    # continuous_patch = annotate_continuous_patches(image.shape[:2], 32,circles)
+    # image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,width)
+    # f,a = plt.subplots(1,2,figsize=(16, 8))
+    # # plt.figure(figsize=(8, 8))
+    # a[0].imshow(image)
+    # a[0].imshow(annotation_image, cmap='binary', alpha=0.5)
+    # a[1].imshow(continuous_patch)
+    # plt.show()
 
 
     # if SAVE_FILE:
@@ -272,14 +336,12 @@ for i in range(0,len(fiducial_images)):
     #     save_mask_to_file(image_mask, circles, save_name)
     #     f_list.write(image_name[:-1]+' ' + save_name + '.png' + '\n')
 print('done')
-# if SAVE_FILE:
-#     f_list.close()
-
-
-
-
-
-
+if SAVE_FILE:
+    f_list.close()
+print(in_cnt)
+print(out_cnt)
+# Divide each number by 555 to calculate percentages
+# plot_pie_chart(circle_numbers)
 
 #
 #

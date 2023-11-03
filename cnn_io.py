@@ -14,15 +14,15 @@ from saicinpainting.training.trainers.default import DefaultInpaintingTrainingMo
 BASE_PATH = '/home/huifang/workspace/'
 def get_circle_Generator():
     generator = Generator()
-    generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_with_0.125negative_finetune+finetune_onlypixel/g_800.pth'))
-    # generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'))
+    # generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_with_0.125negative_finetune+finetune_onlypixel/g_800.pth'))
+    generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'))
 
     # generator = Dot_Generator()
     # generator.load_state_dict(torch.load(
     #     '/media/huifang/data/experiment/pix2pix/saved_models/transformer-dot-sigmoid-mse-5pe-noskip/g_800.pth'))
     return generator
 def get_position_Generator():
-    generator = Attention_Generator()
+    generator = Patch_Binary_Generator()
     generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/binary-square-alltrain-5-pe/g_400.pth'))
     # generator.load_state_dict(
     #     torch.load('/media/huifang/data/experiment/pix2pix/saved_models/binary-square-5pe-with-aug-nocrop/g_800.pth'))

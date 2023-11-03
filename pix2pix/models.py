@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .utils import trunc_normal_
+from utils import trunc_normal_
 import math
 
 def weights_init_normal(m):
@@ -202,14 +202,14 @@ def reconstruct_batch_images(patches, image_size):
     return reconstructed_images
 
 
-class Attention_Generator(nn.Module):
+class Patch_Binary_Generator(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, patch_size=32):
-        super(Attention_Generator, self).__init__()
+        super(Patch_Binary_Generator, self).__init__()
         self.pos_embed = nn.Parameter(torch.zeros(1, 4096, 256))
         self.blocks = nn.ModuleList([
             Block(
-                dim=256, num_heads=4)
-            for i in range(5)])
+                dim=256, num_heads=16)
+            for _ in range(5)])
         self.norm = nn.LayerNorm(256)
         self.patch_size = patch_size
 
@@ -240,13 +240,16 @@ class Attention_Generator(nn.Module):
         self.up2 = UNetUp(128, 32, dropout=0.5)
         self.up3 = UNetUp(64, 16)
 
-        self.head = nn.Linear(256, 1)
+        self.head = nn.Sequential(
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
 
         self.final = nn.Sequential(
             nn.Upsample(scale_factor=2),
             nn.ZeroPad2d((1, 0, 1, 0)),
             nn.Conv2d(32, out_channels, 4, padding=1),
-            nn.Tanh()
+            nn.Sigmoid()
         )
 
         # self.apply(self._init_weights)
@@ -309,53 +312,46 @@ class Attention_Generator(nn.Module):
 
 
 
-class Dot_Generator(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, patch_size=4):
-        super(Dot_Generator, self).__init__()
+class Attention_Generator(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, with_skip_connection=True):
+        super(Attention_Generator, self).__init__()
         self.pos_embed = nn.Parameter(torch.zeros(1, 4096, 32))
         self.blocks = nn.ModuleList([
             Block(
-                dim=32, num_heads=4)
+                dim=32, num_heads=8)
             for _ in range(6)])
         self.norm = nn.LayerNorm(32)
-        self.patch_size = patch_size
 
+        self.with_skip_connection=with_skip_connection
         self.down1 = UNetDown(in_channels, 4, normalize=False)
         self.down2 = UNetDown(4, 8, dropout=0.5)
         self.down3 = UNetDown(8, 16, dropout=0.5)
         self.down4 = UNetDown(16, 32, normalize=False, dropout=0.5)
         self.down5 = UNetDown(32, 32, normalize=False, dropout=0.5)
+        if self.with_skip_connection:
+            self.up1 = UNetUp(32, 32, dropout=0.5)
+            self.up2 = UNetUp(64, 16, dropout=0.5)
+            self.up3 = UNetUp(32, 8, dropout=0.5)
+            self.up4 = UNetUp(16, 4)
+            self.final = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                nn.Conv2d(8, out_channels, 4, padding=1),
+                nn.Sigmoid()
+            )
+        else:
+            self.up1 = UNetUpNoSkip(32, 32, dropout=0.5)
+            self.up2 = UNetUpNoSkip(32, 16, dropout=0.5)
+            self.up3 = UNetUpNoSkip(16, 8, dropout=0.5)
+            self.up4 = UNetUpNoSkip(8, 4)
+            self.final = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                nn.Conv2d(4, out_channels, 4, padding=1),
+                nn.Sigmoid()
+            )
 
-        #self.up1 = UNetUp(32, 32, dropout=0.5)
-        #self.up2 = UNetUp(64, 16, dropout=0.5)
-        #self.up3 = UNetUp(32, 8, dropout=0.5)
-        #self.up4 = UNetUp(16, 4)
-        self.up1 = UNetUpNoSkip(32, 32, dropout=0.5)
-        self.up2 = UNetUpNoSkip(32, 16, dropout=0.5)
-        self.up3 = UNetUpNoSkip(16, 8, dropout=0.5)
-        self.up4 = UNetUpNoSkip(8, 4)
 
-
-        # self.down1 = UNetDown(in_channels, 16, normalize=False)
-        # self.down2 = UNetDown(16, 32, dropout=0.5)
-        # self.down3 = UNetDown(32, 64, dropout=0.5)
-        # self.down4 = UNetDown(64, 64, normalize=False, dropout=0.5)
-        #
-        # self.up1 = UNetUp(64, 64, dropout=0.5)
-        # self.up2 = UNetUp(128, 32, dropout=0.5)
-        # self.up3 = UNetUp(64, 16)
-
-        self.head = nn.Linear(32, 1)
-
-        self.final = nn.Sequential(
-            nn.Upsample(scale_factor=2),
-            nn.ZeroPad2d((1, 0, 1, 0)),
-            nn.Conv2d(4, out_channels, 4, padding=1),
-            nn.Sigmoid()
-            #nn.Tanh()
-        )
-
-        # self.apply(self._init_weights)
 
     def interpolate_pos_encoding(self, patches, w, h):
 
@@ -375,8 +371,7 @@ class Dot_Generator(nn.Module):
         )
         assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        return  patch_pos_embed
-
+        return patch_pos_embed
 
     def forward(self, x):
         B, nc, w, h = x.shape
@@ -395,16 +390,233 @@ class Dot_Generator(nn.Module):
         d5_flatten_with_pe = self.norm(d5_flatten_with_pe)
 
         d5_attention = d5_flatten_with_pe.transpose(1,2).squeeze().view(d5.shape)
-        #u1 = self.up1(d5_attention, d4)
-        #u2 = self.up2(u1, d3)
-        #u3 = self.up3(u2, d2)
-        #u4 = self.up4(u3, d1)
-        u1 = self.up1(d5_attention)
-        u2 = self.up2(u1)
-        u3 = self.up3(u2)
-        u4 = self.up4(u3)
+        if self.with_skip_connection:
+            u1 = self.up1(d5_attention, d4)
+            u2 = self.up2(u1, d3)
+            u3 = self.up3(u2, d2)
+            u4 = self.up4(u3, d1)
+        else:
+            u1 = self.up1(d5_attention)
+            u2 = self.up2(u1)
+            u3 = self.up3(u2)
+            u4 = self.up4(u3)
         final = self.final(u4)
         return final
+
+
+
+
+class Parrel_Attention_Generator(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, patch_size=32,with_skip_connection=True):
+        super(Parrel_Attention_Generator, self).__init__()
+
+        self.pos_embed = nn.Parameter(torch.zeros(1, 4096, 32))
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=32, num_heads=8)
+            for _ in range(6)])
+        self.norm = nn.LayerNorm(32)
+        self.head = nn.Sequential(
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+        self.patch_size = patch_size
+
+        self.with_skip_connection = with_skip_connection
+        self.down1 = UNetDown(in_channels, 4, normalize=False)
+        self.down2 = UNetDown(4, 8, dropout=0.5)
+        self.down3 = UNetDown(8, 16, dropout=0.5)
+        self.down4 = UNetDown(16, 32, normalize=False, dropout=0.5)
+        self.down5 = UNetDown(32, 32, normalize=False, dropout=0.5)
+        if self.with_skip_connection:
+            self.up1 = UNetUp(32, 32, dropout=0.5)
+            self.up2 = UNetUp(64, 16, dropout=0.5)
+            self.up3 = UNetUp(32, 8, dropout=0.5)
+            self.up4 = UNetUp(16, 4)
+            self.final = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                nn.Conv2d(8, out_channels, 4, padding=1),
+                nn.Sigmoid()
+            )
+        else:
+            self.up1 = UNetUpNoSkip(32, 32, dropout=0.5)
+            self.up2 = UNetUpNoSkip(32, 16, dropout=0.5)
+            self.up3 = UNetUpNoSkip(16, 8, dropout=0.5)
+            self.up4 = UNetUpNoSkip(8, 4)
+            self.final = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                nn.Conv2d(4, out_channels, 4, padding=1),
+                nn.Sigmoid()
+            )
+
+
+    def interpolate_pos_encoding(self, patches, w, h):
+
+        npatch = patches.shape[1]
+        N = self.pos_embed.shape[1]
+        if npatch == N and w == h:
+            return self.pos_embed
+        patch_pos_embed = self.pos_embed
+        dim = patch_pos_embed.shape[-1]
+        w0 = w // self.patch_size
+        h0 = h // self.patch_size
+        w0, h0 = w0 + 0.1, h0 + 0.1
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+            mode='bicubic',
+        )
+        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return patch_pos_embed
+
+    def forward(self, x):
+        #circle mask output
+        d1 = self.down1(x)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+        d5 = self.down5(d4)
+
+        if self.with_skip_connection:
+            u1 = self.up1(d5, d4)
+            u2 = self.up2(u1, d3)
+            u3 = self.up3(u2, d2)
+            u4 = self.up4(u3, d1)
+        else:
+            u1 = self.up1(d5)
+            u2 = self.up2(u1)
+            u3 = self.up3(u2)
+            u4 = self.up4(u3)
+        unet_output = self.final(u4)
+
+        #binary transformer output
+        B, nc, w, h = x.shape
+        patches = divide_batch_into_patches(x, self.patch_size)
+        pos_embed = self.interpolate_pos_encoding(patches, w, h)
+        patches = patches.squeeze()
+        d1 = self.down1(patches)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+        d5 = self.down5(d4)
+
+        d5_flatten = d5.flatten(1).unsqueeze(0)
+
+        d5_flatten_with_pe = d5_flatten + 5 * pos_embed
+        for blk in self.blocks:
+            d5_flatten_with_pe = blk(d5_flatten_with_pe)
+        d5_flatten_with_pe = self.norm(d5_flatten_with_pe)
+
+        y = self.head(d5_flatten_with_pe)
+        num_patches_w = w // self.patch_size
+        num_patches_h = h // self.patch_size
+        transformer_output = y.view(1, num_patches_w, num_patches_h)
+        return unet_output,transformer_output
+
+
+class Rich_Parrel_Attention_Generator(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, patch_size=32,with_skip_connection=True):
+        super(Rich_Parrel_Attention_Generator, self).__init__()
+        self.pos_embed = nn.Parameter(torch.zeros(1, 4096, 256))
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=256, num_heads=8)
+            for _ in range(6)])
+        self.norm = nn.LayerNorm(256)
+        self.head = nn.Sequential(
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+        self.patch_size = patch_size
+
+        self.with_skip_connection = with_skip_connection
+        self.down1 = UNetDown(in_channels, 16, normalize=False)
+        self.down2 = UNetDown(16, 32, dropout=0.5)
+        self.down3 = UNetDown(32, 64, dropout=0.5)
+        self.down4 = UNetDown(64, 64, normalize=False, dropout=0.5)
+        if self.with_skip_connection:
+            self.up1 = UNetUp(64, 64, dropout=0.5)
+            self.up2 = UNetUp(128, 32, dropout=0.5)
+            self.up3 = UNetUp(64, 16)
+            self.final = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                nn.Conv2d(32, out_channels, 4, padding=1),
+                nn.Sigmoid()
+            )
+        else:
+            self.up1 = UNetUpNoSkip(64, 64, dropout=0.5)
+            self.up2 = UNetUpNoSkip(64, 32, dropout=0.5)
+            self.up3 = UNetUpNoSkip(32, 16)
+            self.final = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                nn.Conv2d(16, out_channels, 4, padding=1),
+                nn.Sigmoid()
+            )
+
+    def interpolate_pos_encoding(self, patches, w, h):
+        npatch = patches.shape[1]
+        N = self.pos_embed.shape[1]
+        if npatch == N and w == h:
+            return self.pos_embed
+        patch_pos_embed = self.pos_embed
+        dim = patch_pos_embed.shape[-1]
+        w0 = w // self.patch_size
+        h0 = h // self.patch_size
+        w0, h0 = w0 + 0.1, h0 + 0.1
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+            mode='bicubic',
+        )
+        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return patch_pos_embed
+
+    def forward(self, x):
+        # circle mask output
+        d1 = self.down1(x)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+
+        if self.with_skip_connection:
+            u1 = self.up1(d4, d3)
+            u2 = self.up2(u1, d2)
+            u3 = self.up3(u2, d1)
+        else:
+            u1 = self.up1(d4)
+            u2 = self.up2(u1)
+            u3 = self.up3(u2)
+        unet_output = self.final(u3)
+
+        # binary transformer output
+        B, nc, w, h = x.shape
+        patches = divide_batch_into_patches(x, self.patch_size)
+        pos_embed = self.interpolate_pos_encoding(patches, w, h)
+        patches = patches.squeeze()
+        d1 = self.down1(patches)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+
+        d4_flatten = d4.flatten(1).unsqueeze(0)
+
+        d4_flatten_with_pe = d4_flatten + 5 * pos_embed
+        for blk in self.blocks:
+            d4_flatten_with_pe = blk(d4_flatten_with_pe)
+        d4_flatten_with_pe = self.norm(d4_flatten_with_pe)
+        y = self.head(d4_flatten_with_pe)
+        num_patches_w = w // self.patch_size
+        num_patches_h = h // self.patch_size
+        transformer_output = y.view(1, num_patches_w, num_patches_h)
+        return unet_output, transformer_output
+
+
 
 ##############################
 
@@ -420,12 +632,15 @@ class Generator(nn.Module):
         self.up2 = UNetUp(128, 32, dropout=0.5)
         self.up3 = UNetUp(64, 16)
 
+
+
         self.final = nn.Sequential(
             nn.Upsample(scale_factor=2),
             nn.ZeroPad2d((1, 0, 1, 0)),
             nn.Conv2d(32, out_channels, 4, padding=1),
-            nn.Tanh()
+            nn.Sigmoid()
         )
+
 
     def forward(self, x):
         # U-Net generator with skip connections from encoder to decoder
@@ -462,14 +677,39 @@ class Discriminator(nn.Module):
             nn.Conv2d(8, 1, 4, padding=1, bias=False)
         )
 
+        # self.model = nn.Sequential(
+        #     *discriminator_block(in_channels, 16, normalization=False),
+        #     *discriminator_block(16, 32),
+        #     nn.ZeroPad2d((1, 0, 1, 0)),
+        #     nn.Conv2d(32, 1, 4, padding=1, bias=False)
+        # )
+
     # def forward(self, img_A, img_B):
     #     # Concatenate image and condition image by channels to produce input
     #     img_input = torch.cat((img_A, img_B), 1)
     #     return self.model(img_input)
 
     def forward(self, img_B):
+        print(img_B.shape)
 
         return self.model(img_B)
 
+class SingleDiscriminator(nn.Module):
+    def __init__(self, input_channels=1):
+        super(SingleDiscriminator, self).__init__()
 
+        # Define a neural network architecture with fewer channels
+        self.model = nn.Sequential(
+            nn.Conv2d(input_channels, 4, kernel_size=4, stride=2, padding=1),  # Convolutional layer
+            nn.LeakyReLU(0.2),  # Apply LeakyReLU activation
+            nn.Conv2d(4, 8, kernel_size=4, stride=2, padding=1),  # Convolutional layer
+            nn.BatchNorm2d(8),  # Batch normalization
+            nn.LeakyReLU(0.2),  # Apply LeakyReLU activation
+            nn.Flatten(),  # Flatten the output
+            nn.Linear(8 * 8 * 8, 1),  # Fully connected layer
+            nn.Sigmoid()  # Apply Sigmoid activation for binary classification
+        )
+    def forward(self, x):
+            # Forward pass through the network
+            return self.model(x)
 

@@ -1,5 +1,7 @@
 import argparse
 import os
+
+import matplotlib.pyplot as plt
 import numpy as np
 import math
 import itertools
@@ -9,6 +11,7 @@ import sys
 
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
+from losses import *
 
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -25,11 +28,11 @@ from utils import divide_batch_into_patches, reconstruct_batch_images
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--epoch', type=int, default=400, help='epoch to start training from')
-parser.add_argument('--n_epochs', type=int, default=801, help='number of epochs of training')
-parser.add_argument('--pretrained_name', type=str, default="binary-square-alltrain-5-pe",
+parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
+parser.add_argument('--n_epochs', type=int, default=401, help='number of epochs of training')
+parser.add_argument('--pretrained_name', type=str, default="",
                     help='name of the dataset')
-parser.add_argument('--model_dir', type=str, default="final_binary_with_aug_select_0.9_images", help='name of the dataset')
+parser.add_argument('--model_dir', type=str, default="final_attn_inparrel_test", help='name of the dataset')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--lr', type=float, default=0.0001, help='adam: learning rate')
 parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
@@ -63,10 +66,11 @@ else:
     device = 'cpu'
 
 # ------ Configure loss -------
-criterion_binary = torch.nn.MSELoss()
+# criterion= torch.nn.MSELoss()
+criterion = FocalLoss()
 # ------ Configure model -------
 # Initialize generator
-generator = Patch_Binary_Generator()
+generator = Rich_Parrel_Attention_Generator(with_skip_connection=True)
 if args.epoch != 0:
     generator.load_state_dict(torch.load(model_save_path +'/%s/g_%d.pth' % (args.pretrained_name, args.epoch)))
 else:
@@ -79,10 +83,22 @@ optimizer = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1,
 # Configure dataloaders
 transforms_rgb = [transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+transforms_gray = [transforms.ToTensor()]
 
-train_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb,mode='train',test_group=1,aug=True),
+
+# test_data_set = AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1,aug=True)
+# for i in range(177,test_data_set.__len__(),1):
+#     print(i)
+#     batch= test_data_set.__getitem__(i)
+#     f,a = plt.subplots(1,3)
+#     a[0].imshow(batch['A'])
+#     a[1].imshow(batch['B'])
+#     a[2].imshow(batch['C'])
+#     plt.show()
+
+train_dataloader = DataLoader(AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1,aug=True),
                               batch_size=args.batch_size, shuffle=True, num_workers=args.n_cpu)
-test_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb,mode='test',test_group=1,aug=False),
+test_dataloader = DataLoader(AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='test',test_group=1,aug=False),
                              batch_size=1, shuffle=False, num_workers=args.n_cpu)
 
 test_samples = cycle(test_dataloader)
@@ -94,11 +110,13 @@ def sample_images(epoch,batches_done):
     test_batch = next(test_samples)
     test_image = test_batch['A'].to(device)
     test_labels = test_batch['B'].to(device)
-    output = generator(test_image)
+    unet_output,transformer_output = generator(test_image)
     # img_sample = torch.cat((test_a.data, output.data), -2)
     save_image(test_image.data, image_save_path+'/%s/%s_%s_img.png' % (args.model_dir,epoch,batches_done), nrow=4, normalize=True)
     save_image(test_labels.data, image_save_path+'/%s/%s_%s_gt.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
-    save_image(output.data, image_save_path + '/%s/%s_%s_mask.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
+    save_image(unet_output.data, image_save_path + '/%s/%s_%s_mask.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
+    save_image(transformer_output.data, image_save_path + '/%s/%s_%s_patch.png' % (args.model_dir, epoch, batches_done), nrow=4,
+               normalize=True)
 
 
 # ------------------------------------------
@@ -110,21 +128,18 @@ logger = SummaryWriter(log_save_path + '/%s' % args.model_dir)
 for epoch in range(args.epoch, args.n_epochs):
     for i, batch in enumerate(train_dataloader):
         images = batch['A'].to(device)
-        labels = batch['B'].to(device)
-        # labels = labels.unsqueeze(0)
-        # labels = labels.flatten(1)
-        # Model inputs
-        # images = Variable(images.type(Tensor))
-        # labels = Variable(labels.type(Tensor))
-        predictions = generator(images)
+        masks = batch['B'].to(device)
+        patches = batch['C'].to(device)
+        unet_output,transformer_output = generator(images)
         optimizer.zero_grad()
         # compute loss
-        loss = criterion_binary(predictions,labels)
+        unet_loss = criterion(unet_output,masks)
+        binary_loss = criterion(transformer_output,patches)
+        loss = unet_loss + binary_loss
         # loss_G = loss_pixel
         loss.backward()
 
         optimizer.step()
-
         # --------------
         #  Log Progress
         # --------------
@@ -145,7 +160,7 @@ for epoch in range(args.epoch, args.n_epochs):
             sample_images(epoch, batches_done)
         # --------------tensor board--------------------------------#
         if batches_done % 100 == 0:
-            info = {'loss': loss.item()}
+            info = {'loss': loss.item(), 'unet loss': unet_loss.item(),'binary loss':binary_loss.item()}
             for tag, value in info.items():
                 logger.add_scalar(tag, value, batches_done)
             for tag, value in generator.named_parameters():

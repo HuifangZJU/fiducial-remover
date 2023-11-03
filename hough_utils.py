@@ -4,7 +4,7 @@ import numpy as np
 import time
 from numba import jit
 from matplotlib import pyplot as plt
-import utils.icp as icp
+import geo_utils.icp as icp
 from PIL import Image, ImageFilter
 from scipy import stats
 from PIL import Image
@@ -387,6 +387,16 @@ def generate_mask(image_size,circles,circle_width):
     mask = np.zeros(image_size)
     for i in range(circles.shape[0]):
         cv2.circle(mask, (circles[i, 0], circles[i, 1]), circles[i, 2], 1, circle_width)
+    return mask
+
+def generate_weighted_mask(image_size,in_tissue_circles,out_tissue_circles,circle_width):
+    mask = np.zeros(image_size)
+
+    # Draw circles with value 1
+    for (x, y, r,_) in in_tissue_circles:
+        cv2.circle(mask, (x, y), r, 5, -1)  # -1 fills the circle
+    for (x, y, r,_) in out_tissue_circles:
+        cv2.circle(mask, (x, y), r, 1, -1)
     return mask
 
 def run_circle_max(crop_image,radius,max_n,step=1):

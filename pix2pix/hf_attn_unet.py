@@ -25,11 +25,11 @@ from utils import divide_batch_into_patches, reconstruct_batch_images
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--epoch', type=int, default=400, help='epoch to start training from')
-parser.add_argument('--n_epochs', type=int, default=801, help='number of epochs of training')
-parser.add_argument('--pretrained_name', type=str, default="binary-square-alltrain-5-pe",
+parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
+parser.add_argument('--n_epochs', type=int, default=401, help='number of epochs of training')
+parser.add_argument('--pretrained_name', type=str, default="",
                     help='name of the dataset')
-parser.add_argument('--model_dir', type=str, default="final_binary_with_aug_select_0.9_images", help='name of the dataset')
+parser.add_argument('--model_dir', type=str, default="final_attn_unet_test", help='name of the dataset')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--lr', type=float, default=0.0001, help='adam: learning rate')
 parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
@@ -66,7 +66,7 @@ else:
 criterion_binary = torch.nn.MSELoss()
 # ------ Configure model -------
 # Initialize generator
-generator = Patch_Binary_Generator()
+generator = Attention_Generator(with_skip_connection=False)
 if args.epoch != 0:
     generator.load_state_dict(torch.load(model_save_path +'/%s/g_%d.pth' % (args.pretrained_name, args.epoch)))
 else:
@@ -79,10 +79,22 @@ optimizer = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1,
 # Configure dataloaders
 transforms_rgb = [transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+transforms_gray = [transforms.ToTensor()]
 
-train_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb,mode='train',test_group=1,aug=True),
+
+test_data_set = AttnDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='test',test_group=1,aug=False)
+print(len(test_data_set))
+for i in range(test_data_set.__len__(),0,-1):
+    print(i)
+    batch= test_data_set.__getitem__(i)
+    f,a = plt.subplots(1,2)
+    a[0].imshow(batch['A'])
+    a[1].imshow(batch['B'])
+    plt.show()
+
+train_dataloader = DataLoader(AttnDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1,aug=True),
                               batch_size=args.batch_size, shuffle=True, num_workers=args.n_cpu)
-test_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb,mode='test',test_group=1,aug=False),
+test_dataloader = DataLoader(AttnDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='test',test_group=1,aug=False),
                              batch_size=1, shuffle=False, num_workers=args.n_cpu)
 
 test_samples = cycle(test_dataloader)
@@ -111,11 +123,6 @@ for epoch in range(args.epoch, args.n_epochs):
     for i, batch in enumerate(train_dataloader):
         images = batch['A'].to(device)
         labels = batch['B'].to(device)
-        # labels = labels.unsqueeze(0)
-        # labels = labels.flatten(1)
-        # Model inputs
-        # images = Variable(images.type(Tensor))
-        # labels = Variable(labels.type(Tensor))
         predictions = generator(images)
         optimizer.zero_grad()
         # compute loss

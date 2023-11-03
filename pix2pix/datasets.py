@@ -1,6 +1,7 @@
 import sys
 
-
+from imgaug.augmentables.segmaps import SegmentationMapsOnImage
+import torch
 from torch.utils.data import Dataset
 from PIL import Image
 import torchvision.transforms as transforms
@@ -10,7 +11,7 @@ import imgaug.augmenters as iaa
 import numpy as np
 import cv2
 from matplotlib import pyplot as plt
-
+import random
 SAVE_ROOT = '/media/huifang/data/fiducial/annotation/'
 
 def get_augmentation_parameters():
@@ -34,10 +35,10 @@ def get_augmentation_parameters():
         # iaa.Crop(percent=crop_values),
         iaa.Affine(
             scale=(0.8, 1.0),  # random scale between 80% and 100%
-            rotate=(-15, 15)  # random rotation between -25 to 25 degrees
+            rotate=(-10, 10)  # random rotation between -25 to 25 degrees
         ),
-        iaa.Multiply((0.7, 1.3)),  # change brightness
-        iaa.GaussianBlur(sigma=(0, 2.0))  # apply Gaussian blur
+        iaa.Multiply((0.5, 1.2)),  # change brightness
+        iaa.GaussianBlur(sigma=(0, 1.0))  # apply Gaussian blur
     ], random_order=False)  # apply the augmentations in random order
     return seq
 
@@ -65,19 +66,45 @@ def augment_image_and_mask(image, mask):
     image_aug, mask_aug = seq(images=[image],segmentation_maps=[mask])
     return image_aug[0],mask_aug[0]
 
+def augment_image_mask_and_keypoints(image, mask, keypoints):
+    image = image.astype(np.uint8)
+    mask = mask.astype(np.uint8)
+    segmap = SegmentationMapsOnImage(mask, shape=image.shape)
+
+    seq = get_augmentation_parameters()
+
+    kps = [ia.Keypoint(x=p[0], y=p[1]) for p in keypoints]
+    kps_obj = ia.KeypointsOnImage(kps, shape=image.shape)
+
+    # Augment image and keypoints
+    image_aug, mask_aug, kps_aug = seq(image=image, segmentation_maps=segmap,keypoints=kps_obj)
+    scale_factor = image_aug.shape[1] / image.shape[1]  # based on width
+    keypoints_aug = [(kp.x, kp.y, p[2] * scale_factor) for kp, p in zip(kps_aug.keypoints, keypoints)]
+    keypoints_aug = [(int(x), int(y),int(z)) for x, y, z in keypoints_aug]
+
+    return image_aug, mask_aug.get_arr(), keypoints_aug
 
 def convert_cv2_to_pil(cv2_img):
-    # Convert from BGR to RGB
-    rgb_image = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
+    # Check the image mode
+    if len(cv2_img.shape) == 3:  # RGB image
+        # Convert BGR to RGB
+        cv2_image_rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(cv2_image_rgb)
+    elif len(cv2_img.shape) == 2:  # Grayscale image
+        pil_image = Image.fromarray(cv2_img, 'L')
+    else:
+        raise ValueError("Unsupported image format")
 
-    # Convert to PIL Image and return
-    pil_image = Image.fromarray(rgb_image)
     return pil_image
-def convert_pil_to_cv2(pil_img):
-    np_image = np.array(pil_img)
 
-    # Convert the NumPy array to a cv2 image
-    cv2_image = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR)
+def convert_pil_to_cv2(pil_image):
+    if pil_image.mode == 'RGB':
+        cv2_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+    elif pil_image.mode == 'L':
+        cv2_image = np.array(pil_image)
+    else:
+        raise ValueError("Unsupported image mode: {}".format(pil_image.mode))
+
     return cv2_image
 
 def get_annotated_circles(annotation_path):
@@ -137,36 +164,20 @@ def get_annotation_path(imagepath):
     return data_path
 
 
-class ImageDataset(Dataset):
-    def __init__(self, path, transforms_a=None,transforms_b=None):
-        self.transform_a = transforms.Compose(transforms_a)
-        self.transform_b = transforms.Compose(transforms_b)
-        f = open(path, 'r')
-        self.files = f.readlines()
-        f.close()
 
-    def __getitem__(self, index):
-        img_path = self.files[index % len(self.files)].strip()
-        img_path = img_path.split(' ')
+def generate_heatmap(h, w, center, sigma):
+    x = torch.arange(w).reshape(1, -1).repeat(h, 1).float()
+    y = torch.arange(h).reshape(-1, 1).repeat(1, w).float()
 
-        img_a = Image.open(img_path[0])
-        img_b = Image.open(img_path[1])
+    distance_from_center = (x - center[0]) ** 2 + (y - center[1]) ** 2
+    heatmap = torch.exp(-distance_from_center / (2 * sigma ** 2))
 
+    return heatmap
 
-        if np.random.random() < 0.7:
-            if np.random.random()<0.5:
-                img_a = Image.fromarray(np.fliplr(np.array(img_a)),'RGB')
-                img_b = Image.fromarray(np.fliplr(np.array(img_b)), 'L')
-            else:
-                img_a = Image.fromarray(np.flipud(np.array(img_a)),'RGB')
-                img_b = Image.fromarray(np.flipud(np.array(img_b)), 'L')
+def generate_heatmaps(h, w, centers, sigmas):
+    heatmaps = [generate_heatmap(h, w, center, sigma) for center, sigma in zip(centers, sigmas)]
+    return torch.stack(heatmaps, dim=0)
 
-        img_a = self.transform_a(img_a)
-        img_b = self.transform_b(img_b)
-        return {'A': img_a, 'B':img_b}
-
-    def __len__(self):
-        return len(self.files)
 
 class BinaryDataset(Dataset):
     def __init__(self, transforms_=None,patch_size=32,mode='test',test_group=1,aug=True):
@@ -174,15 +185,17 @@ class BinaryDataset(Dataset):
         self.patch_size = patch_size
         self.mode = mode
         self.aug = aug
-        path ='/home/huifang/workspace/data/imagelists/st_image_trainable_temp_fiducial.txt'
+        path ='/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
         f = open(path, 'r')
         files = f.readlines()
         f.close()
         self.files=[]
         for line in files:
             group = line.rstrip('\n').split(' ')[-1]
+            ann_percentage = line.rstrip('\n').split(' ')[-2]
             if self.mode == 'train' and int(group) != test_group:
-                self.files.append(line)
+                if float(ann_percentage)>0.9:
+                    self.files.append(line)
             if self.mode == 'test' and int(group) == test_group:
                 self.files.append(line)
 
@@ -192,8 +205,7 @@ class BinaryDataset(Dataset):
         image_name = image_name.rstrip('\n')
         img_a = cv2.imread(image_name)
         # show_grids(image,64)
-        annotation_path = get_annotation_path(image_name)
-        circles = np.load(annotation_path + '/circles.npy')
+        circles = np.load(image_name.split('.')[0]+'.npy')
         if self.mode == 'train':
             img_a, circles = augment_image_and_keypoints(img_a, circles)
         img_a = convert_cv2_to_pil(img_a)
@@ -213,12 +225,13 @@ def find_nearest_multiple_of_32(x):
         return x
     else:
         return x + (base - remainder)
+
 class DotDataset(Dataset):
     def __init__(self, transforms_=None,mode='test',test_group=1,aug=True):
         self.transform = transforms.Compose(transforms_)
         self.mode =mode
         self.aug = aug
-        path ='/home/huifang/workspace/data/imagelists/st_image_trainable_temp_fiducial.txt'
+        path ='/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
         f = open(path, 'r')
         files = f.readlines()
         f.close()
@@ -248,7 +261,7 @@ class DotDataset(Dataset):
         annotation = annotate_dots([w_new,h_new],circles)
         annotation = annotation.reshape(annotation.shape[0],annotation.shape[1],1)
         img_a = img_a.resize((h_new, w_new), Image.ANTIALIAS)
-        if self.mode == 'train':
+        if self.aug:
             img_a = convert_pil_to_cv2(img_a)
             img_a, annotation = augment_image_and_mask(img_a,annotation)
             img_a = convert_cv2_to_pil(img_a)
@@ -265,110 +278,203 @@ class DotDataset(Dataset):
         return len(self.files)
 
 
-
-class PointsDataset(Dataset):
-    def __init__(self, transforms_=None,mode='test',test_group=1,aug=True):
-        self.transform = transforms.Compose(transforms_)
+class AttnDataset(Dataset):
+    def __init__(self, transforms_a=None,transforms_b=None,mode='test',test_group=1,aug=True):
+        self.transform_a = transforms.Compose(transforms_a)
+        self.transform_b = transforms.Compose(transforms_b)
+        self.mode = mode
         self.aug = aug
-        path ='/home/huifang/workspace/data/imagelists/st_image_trainable_temp_fiducial.txt'
-        f = open(path, 'r')
+        test_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+        train_path = '/home/huifang/workspace/data/imagelists/st_upsample_trainable_images_final.txt'
+
+        if self.mode == 'train':
+            f = open(train_path, 'r')
+        elif self.mode == 'test':
+            f = open(test_path, 'r')
+        else:
+            assert 'mode error!'
+            return
+        files = f.readlines()
+        f.close()
+        self.files = []
+        for line in files:
+            group = line.rstrip('\n').split(' ')[-1]
+            ann_percentage = line.rstrip('\n').split(' ')[-2]
+            if self.mode == 'train' and int(group) != test_group:
+                self.files.append(line)
+                # if float(ann_percentage)>0.95:
+                #     self.files.append(line)
+            if self.mode == 'test' and int(group) == test_group:
+                self.files.append(line)
+
+    def __getitem__(self, index):
+
+        img_path = self.files[index % len(self.files)].strip()
+        img_path = img_path.split(' ')
+
+        image_name = img_path[0]
+        image = cv2.imread(image_name)
+
+        mask_name = image_name.split('.')[0] + '_mask_width2.png'
+        mask = cv2.imread(mask_name, cv2.IMREAD_GRAYSCALE)
+        if self.aug:
+            image, mask = augment_image_and_mask(image, mask[:,:,np.newaxis])
+            mask = np.squeeze(mask, axis=-1)
+        image = convert_cv2_to_pil(image)
+        mask = convert_cv2_to_pil(mask)
+        h, w = image.size
+        h_new = find_nearest_multiple_of_32(h)
+        w_new = find_nearest_multiple_of_32(w)
+        image = image.resize((h_new, w_new), Image.ANTIALIAS)
+        mask = mask.resize((h_new, w_new), Image.ANTIALIAS)
+        # image = self.transform_a(image)
+        # mask = self.transform_b(mask)
+        return {'A': image, 'B': mask}
+
+    def __len__(self):
+        return len(self.files)
+
+
+class AttnInparrelDataset(Dataset):
+    def __init__(self, transforms_a=None,transforms_b=None,mode='test',test_group=1,aug=True):
+        self.transform_a = transforms.Compose(transforms_a)
+        self.transform_b = transforms.Compose(transforms_b)
+        self.mode = mode
+        self.aug = aug
+        self.patch_size = 32
+        test_path ='/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+        train_path = '/home/huifang/workspace/data/imagelists/st_upsample_trainable_images_final.txt'
+        if self.mode == 'train':
+            f = open(train_path, 'r')
+        elif self.mode == 'test':
+            f = open(test_path, 'r')
+        else:
+            assert 'mode error!'
+            return
         files = f.readlines()
         f.close()
         self.files=[]
         for line in files:
             group = line.rstrip('\n').split(' ')[-1]
-            if mode == 'train' and int(group) != test_group:
+            ann_percentage = line.rstrip('\n').split(' ')[-2]
+            if self.mode == 'train' and int(group) != test_group:
                 self.files.append(line)
-            if mode == 'test' and int(group) == test_group:
+                # if float(ann_percentage)>0.95:
+                #     self.files.append(line)
+            if self.mode == 'test' and int(group) == test_group:
                 self.files.append(line)
 
     def __getitem__(self, index):
 
-        image_name = self.files[index % len(self.files)].split(' ')[0]
-        image_name = image_name.rstrip('\n')
-        # img_a = Image.open(image_name)
-        img_a = cv2.imread(image_name)
-        # show_grids(image,64)
-        annotation_path = get_annotation_path(image_name)
-        circles = np.load(annotation_path+'/circles.npy')
+        img_path = self.files[index % len(self.files)].strip()
+        img_path = img_path.split(' ')
+        image_name = img_path[0]
+        # Open the image using OpenCV
+        image = cv2.imread(image_name)
 
-        img_a,circles = augment_image_and_keypoints(img_a,circles)
-        plt.imshow(img_a)
-        plt.show()
-        h,w = img_a.shape[:2]
+        mask_name = image_name.split('.')[0] + '_mask_width2.png'
+        mask = cv2.imread(mask_name, cv2.IMREAD_GRAYSCALE)
+        circles = np.load(image_name.split('.')[0] + '.npy')
+
+        if self.aug:
+            image,mask,circles = augment_image_mask_and_keypoints(image,mask[:,:,np.newaxis],circles)
+            mask = np.squeeze(mask, axis=-1)
+        image = convert_cv2_to_pil(image)
+        mask = convert_cv2_to_pil(mask)
+        h, w = image.size
         h_new = find_nearest_multiple_of_32(h)
         w_new = find_nearest_multiple_of_32(w)
-        circles = np.array(circles)
-        circles[:, 0] = circles[:, 0]*h_new/h
-        circles[:, 1] = circles[:, 1] * w_new /w
-        img_a = Image.fromarray(img_a)
-        img_a = img_a.resize((h_new,w_new), Image.ANTIALIAS)
-        img_a = self.transform(img_a)
-        return {'A': img_a, 'B':circles}
+        image = image.resize((h_new, w_new), Image.ANTIALIAS)
+        mask = mask.resize((h_new, w_new), Image.ANTIALIAS)
+        image = self.transform_a(image)
+        mask = self.transform_b(mask)
+        patches = annotate_patches([w_new, h_new], self.patch_size, circles)
+        patches = np.array(patches, dtype=np.float32)
+        return {'A': image, 'B': mask,'C':patches}
 
     def __len__(self):
         return len(self.files)
 
-class ImageRandomCropDataset(Dataset):
-    def __init__(self, path, crop_size,transforms_a=None,transforms_b=None):
+
+class CircleTrainDataset(Dataset):
+    def __init__(self, path, transforms_a=None,transforms_b=None,test_group=1):
         self.transform_a = transforms.Compose(transforms_a)
         self.transform_b = transforms.Compose(transforms_b)
-        self.crop_size = crop_size
         f = open(path, 'r')
-        self.files = f.readlines()
+        files = f.readlines()
         f.close()
+        self.files = []
+        for line in files:
+            group = line.rstrip('\n').split(' ')[-1]
+            if int(group) != test_group:
+                self.files.append(line)
+        self.crop_size = 16
+        self.max_offset= 4
 
     def __getitem__(self, index):
         img_path = self.files[index % len(self.files)].strip()
         img_path = img_path.split(' ')
 
-        img_a = Image.open(img_path[0])
-        img_b = Image.open(img_path[1])
-        w,h = img_a.size
-        crop_w_start = np.random.randint(0,w-self.crop_size)
-        crop_h_start = np.random.randint(0,h-self.crop_size)
+        image_name = img_path[0]
+        mask_name = image_name.split('.')[0] + '_mask_width2.png'
+        # Open the image using OpenCV
+        image = cv2.imread(image_name)
+        mask = cv2.imread(mask_name, cv2.IMREAD_GRAYSCALE)
 
-        img_a = img_a.crop((crop_w_start, crop_h_start, self.crop_size, self.crop_size))
-        img_b = img_b.crop((crop_w_start, crop_h_start, self.crop_size, self.crop_size))
+        xc = int(img_path[1])
+        yc = int(img_path[2])
+        # Add random offsets within the specified bounds
+        x_offset = random.randint(-self.max_offset, self.max_offset)
+        y_offset = random.randint(-self.max_offset, self.max_offset)
 
-        print(img_a.size)
-        print(img_b.size)
-        test = input()
+        # Apply offsets while ensuring the crop remains within the image boundaries
+        x_center = max(0, min(image.shape[1] - 1, xc + x_offset))
+        y_center = max(0, min(image.shape[0] - 1, yc + y_offset))
 
+        # Calculate crop coordinates
+        left = max(0, x_center - self.crop_size)
+        upper = max(0, y_center - self.crop_size)
+        right = min(image.shape[1], x_center + self.crop_size)
+        lower = min(image.shape[0], y_center + self.crop_size)
 
-        if np.random.random() < 0.7:
-            if np.random.random()<0.5:
-                img_a = Image.fromarray(np.fliplr(np.array(img_a)),'RGB')
-                img_b = Image.fromarray(np.fliplr(np.array(img_b)), 'L')
-            else:
-                img_a = Image.fromarray(np.flipud(np.array(img_a)),'RGB')
-                img_b = Image.fromarray(np.flipud(np.array(img_b)), 'L')
+        # Crop the image using OpenCV
 
-        img_a = self.transform_a(img_a)
-        img_b = self.transform_b(img_b)
-        return {'A': img_a, 'B':img_b}
+        cropped_image = image[upper:lower, left:right, :]
+        cropped_mask = mask[upper:lower, left:right,np.newaxis]
+
+        # cropped_image, cropped_mask = augment_image_and_mask(cropped_image, cropped_mask)
+        cropped_mask = np.squeeze(cropped_mask, axis=-1)
+
+        cropped_image = convert_cv2_to_pil(cropped_image)
+        cropped_mask = convert_cv2_to_pil(cropped_mask)
+
+        cropped_image = self.transform_a(cropped_image)
+        cropped_mask = self.transform_b(cropped_mask)
+
+        return {'A': cropped_image, 'B':cropped_mask}
 
     def __len__(self):
         return len(self.files)
 
-class ImageTestDataset(Dataset):
-    def __init__(self, path, transforms_=None):
+
+
+class CircleTestDataset(Dataset):
+    def __init__(self, path, transforms_=None,test_group=1):
         self.transform = transforms.Compose(transforms_)
         f = open(path, 'r')
-        self.files = f.readlines()
+        files = f.readlines()
         f.close()
+        self.files = []
+        for line in files:
+            group = line.rstrip('\n').split(' ')[-1]
+            if int(group) == test_group:
+                self.files.append(line)
 
     def __getitem__(self, index):
         img_path = self.files[index % len(self.files)].strip()
         img_path = img_path.split(' ')
 
         img_a = Image.open(img_path[0])
-        if np.random.random() < 0.7:
-            if np.random.random()<0.5:
-                img_a = Image.fromarray(np.fliplr(np.array(img_a)),'RGB')
-            else:
-                img_a = Image.fromarray(np.flipud(np.array(img_a)),'RGB')
-
         img_a = self.transform(img_a)
         return {'A': img_a}
 

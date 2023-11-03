@@ -1,42 +1,32 @@
 import argparse
-import os
-import numpy as np
-import math
-import itertools
 import time
 import datetime
-import sys
 
-import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
 from torchvision.utils import save_image
-
 from torch.utils.data import DataLoader
-from torchvision import datasets
 from torch.autograd import Variable
 
 from models import *
 from datasets import *
 from itertools import cycle
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
 from tensorboardX import SummaryWriter
-from utils import divide_batch_into_patches, reconstruct_batch_images
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
-parser.add_argument('--n_epochs', type=int, default=201, help='number of epochs of training')
+parser.add_argument('--epoch', type=int, default=400, help='epoch to start training from')
+parser.add_argument('--n_epochs', type=int, default=801, help='number of epochs of training')
 parser.add_argument('--pretrained_name', type=str, default="width2_downsample_nocondition_lamda10_with_0.125negative",
                     help='name of the dataset')
-parser.add_argument('--model_dir', type=str, default="all_auto_width2_attention_only_pixel_finetune", help='name of the dataset')
-parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
+parser.add_argument('--model_dir', type=str, default="final_circle_width2", help='name of the dataset')
+parser.add_argument('--batch_size', type=int, default=64, help='size of the batches')
 parser.add_argument('--lr', type=float, default=0.0001, help='adam: learning rate')
 parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
 parser.add_argument('--b2', type=float, default=0.999, help='adam: decay of first order momentum of gradient')
 parser.add_argument('--decay_epoch', type=int, default=100, help='epoch from which to start lr decay')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-parser.add_argument('--img_height', type=int, default=2048, help='size of image height')
-parser.add_argument('--img_width', type=int, default=2048, help='size of image width')
+parser.add_argument('--img_height', type=int, default=32, help='size of image height')
+parser.add_argument('--img_width', type=int, default=32, help='size of image width')
 parser.add_argument('--channels', type=int, default=3, help='number of image channels')
 parser.add_argument('--sample_interval', type=int, default=50,
                     help='interval between sampling of images from generators')
@@ -51,9 +41,6 @@ log_save_path = experiment_path + '/logs'
 os.makedirs(image_save_path + '/%s' % args.model_dir, exist_ok=True)
 os.makedirs(model_save_path + '/%s' % args.model_dir, exist_ok=True)
 os.makedirs(log_save_path + '/%s' % args.model_dir, exist_ok=True)
-
-train_data_list ="/home/huifang/workspace/data/imagelists/fiducial_auto_width2.txt"
-test_data_list = "/home/huifang/workspace/data/imagelists/fiducial_auto_width2.txt"
 
 # ------------------------------------------
 #                Training preparation
@@ -70,26 +57,18 @@ else:
 criterion_GAN = torch.nn.MSELoss()
 criterion_pixelwise = torch.nn.L1Loss()
 # Loss weight of L1 pixel-wise loss between translated image and real image
-lambda_pixel = 10
+lambda_pixel = 2
 
 # ------ Configure model -------
 # Initialize generator and discriminator
-generator = Attention_Generator()
-discriminator = Discriminator()
+generator = Generator()
+discriminator = SingleDiscriminator()
 if args.epoch != 0:
     generator.load_state_dict(torch.load(model_save_path +'/%s/g_%d.pth' % (args.pretrained_name, args.epoch)))
-    discriminator.load_state_dict(torch.load(model_save_path +'/%s/d_%d.pth' % (args.pretrained_name, args.epoch)))
+    # discriminator.load_state_dict(torch.load(model_save_path +'/%s/d_%d.pth' % (args.pretrained_name, args.epoch)))
 else:
     generator.apply(weights_init_normal)
-    partial_path = '/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'
-    saved_model = torch.load(partial_path)
-    generator_dict = generator.state_dict()
-    state_dict = {k: v for k, v in saved_model.items() if k in generator_dict.keys()}
-    generator_dict.update(state_dict)
-    generator.load_state_dict(generator_dict)
-    # discriminator.load_state_dict(
-    #     torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/d_400.pth'))
-    # discriminator.apply(weights_init_normal)
+    discriminator.apply(weights_init_normal)
 
 generator.to(device)
 discriminator.to(device)
@@ -99,28 +78,34 @@ patch = (1, args.img_height // 2 ** 2, args.img_width // 2 ** 2)
 # ------ Configure optimizer -------
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-parameters_to_freeze = [generator.down1.parameters(), generator.down2.parameters(),generator.down3.parameters(),generator.down4.parameters(),generator.up1.parameters(), generator.up2.parameters(),generator.up3.parameters()]
-for param_group in optimizer_G.param_groups:
-    if param_group['params'] in parameters_to_freeze:
-        for param in param_group['params']:
-            param.requires_grad = False
-
 # ------ Configure data loaders -------
 # Configure dataloaders
-# transforms_rgb = [transforms.Resize((args.img_height, args.img_width), Image.BICUBIC),
-#                transforms.ToTensor(),
-#                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-transforms_rgb = [transforms.ToTensor(),
+transforms_rgb = [transforms.Resize((args.img_height, args.img_width), Image.BICUBIC),
+                transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
 transforms_gray = [transforms.Resize((args.img_height, args.img_width), Image.BICUBIC),
-               transforms.ToTensor(),
-               transforms.Normalize((0.5,), (0.5,))]
+            transforms.ToTensor()]
+
+transforms_test = [transforms.Resize((2048, 2048), Image.BICUBIC),
+                transforms.ToTensor(),
+               transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+image_list ="/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt"
+circle_list = "/home/huifang/workspace/data/imagelists/st_trainable_circles_downsample_with_negative_final.txt"
+
+test_data_set = CircleTrainDataset(circle_list,transforms_a=transforms_rgb,transforms_b=transforms_gray,test_group=1)
+# for i in range(test_data_set.__len__(),0,-100):
+#     print(i)
+#     batch= test_data_set.__getitem__(i)
+#     f,a = plt.subplots(1,2)
+#     a[0].imshow(batch['A'])
+#     a[1].imshow(batch['B'])
+#     plt.show()
 
 
-train_dataloader = DataLoader(BinaryDataset(transforms_=transforms_rgb),
+train_dataloader = DataLoader(CircleTrainDataset(circle_list,transforms_a=transforms_rgb,transforms_b=transforms_gray,test_group=1),
                               batch_size=args.batch_size, shuffle=True, num_workers=args.n_cpu)
-test_dataloader = DataLoader(ImageTestDataset(test_data_list, transforms_=transforms_rgb, ),
-                             batch_size=1, shuffle=True, num_workers=args.n_cpu)
+test_dataloader = DataLoader(CircleTestDataset(image_list, transforms_=transforms_test, test_group=1),
+                             batch_size=1, shuffle=False, num_workers=args.n_cpu)
 test_samples = cycle(test_dataloader)
 # Tensor type
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
@@ -152,28 +137,29 @@ for epoch in range(args.epoch, args.n_epochs):
         real_B = Variable(real_B.type(Tensor))
         fake_B = generator(real_A)
 
-        optimizer_G.zero_grad()
-        # GAN loss
-        valid = Variable(Tensor(np.ones((real_B.size(0), *patch))), requires_grad=False)
-        fake = Variable(Tensor(np.zeros((real_B.size(0), *patch))), requires_grad=False)
+
         # pred_fake = discriminator(fake_B, real_A)
         pred_fake = discriminator(fake_B)
+        optimizer_G.zero_grad()
+        # GAN loss
+        # valid = Variable(Tensor(np.ones((real_B.size(0), *patch))), requires_grad=False)
+        # fake = Variable(Tensor(np.zeros((real_B.size(0), *patch))), requires_grad=False)
+        valid = Variable(torch.ones_like(pred_fake), requires_grad=False)
+        fake = Variable(torch.zeros_like(pred_fake), requires_grad=False)
         loss_GAN = criterion_GAN(pred_fake, valid)
         # Pixel-wise loss
         loss_pixel = lambda_pixel * criterion_pixelwise(fake_B, real_B)
         # Total loss
         loss_G = loss_GAN + loss_pixel
         # loss_G = loss_pixel
+
         loss_G.backward()
-
         optimizer_G.step()
-
         # ---------------------
         #  Train Discriminator
         # ---------------------
 
         optimizer_D.zero_grad()
-
         # Real loss
         # pred_real = discriminator(real_B, real_A)
         pred_real = discriminator(real_B)
@@ -182,6 +168,7 @@ for epoch in range(args.epoch, args.n_epochs):
         # Fake loss
         # pred_fake = discriminator(fake_B.detach(), real_A)
         pred_fake = discriminator(fake_B.detach())
+
         loss_fake = criterion_GAN(pred_fake, fake)
 
         # Total loss
