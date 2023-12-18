@@ -14,8 +14,8 @@ from saicinpainting.training.trainers.default import DefaultInpaintingTrainingMo
 BASE_PATH = '/home/huifang/workspace/'
 def get_circle_Generator():
     generator = Generator()
-    # generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_with_0.125negative_finetune+finetune_onlypixel/g_800.pth'))
-    generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'))
+    generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/final_circle_width2_unet_with_aug_mse/g_600.pth'))
+    # generator.load_state_dict(torch.load('/media/huifang/data/experiment/pix2pix/saved_models/width2_downsample_nocondition_lamda10_with_0.125negative/g_400.pth'))
 
     # generator = Dot_Generator()
     # generator.load_state_dict(torch.load(
@@ -28,7 +28,20 @@ def get_position_Generator():
     #     torch.load('/media/huifang/data/experiment/pix2pix/saved_models/binary-square-5pe-with-aug-nocrop/g_800.pth'))
     return generator
 
+def get_combined_Generator():
+    generator = Rich_Parrel_Attention_Generator(with_skip_connection=True)
+    # generator = Dual_Attention_Generator()
+    # generator.load_state_dict((torch.load('/media/huifang/data/experiment/pix2pix/saved_models/final_upsample_rich_attn_inparrel_unet_with_skip_select_full_images/g_400.pth')))
+    # generator.load_state_dict((torch.load(
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/final_loss_focal_rich_attn_inparrel_unet/g_400.pth')))
+    generator.load_state_dict((torch.load(
+        '/media/huifang/data/experiment/pix2pix/saved_models/final_solid3_circle_ground_truth/g_600.pth')))
+    # generator.load_state_dict((torch.load(
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/final_loss_0.95alpha_focal_rich_attn_inparrel_unet/g_600.pth')))
+    # generator.load_state_dict((torch.load(
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/final_solid_loss_focal/g_800.pth')))
 
+    return generator
 
 def getInpainter(input_channel,output_channel):
 

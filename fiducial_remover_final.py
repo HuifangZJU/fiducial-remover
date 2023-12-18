@@ -3,6 +3,7 @@ import statistics
 import time
 from omegaconf import OmegaConf
 import yaml
+from scipy.ndimage import zoom
 from skimage.morphology import skeletonize
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
@@ -86,24 +87,26 @@ def binarize_array(array, threshold):
 
     return binary_array
 
-def get_image_var(img_pil):
+def get_image_var(image_name):
+    img_pil = Image.open(image_name.split(' ')[0])
     h, w = img_pil.size
     h_new = find_nearest_multiple_of_32(h)
     w_new = find_nearest_multiple_of_32(w)
     img_pil = img_pil.resize((h_new, w_new), Image.ANTIALIAS)
+
     img_np = np.array(img_pil)
     img_var = transforms_rgb(img_pil)
     img_var = torch.unsqueeze(img_var, dim=0).to(device)
     return img_var,img_np
 
-def get_cnn_mask(img_var):
+def get_cnn_mask(img_var,circle_generator):
     cnn_mask_var = circle_generator(img_var)
     cnn_mask = cnn_mask_var.cpu().detach().numpy().squeeze()
     cnn_mask = np.transpose(cnn_mask, (0, 1))
     cnn_mask = normalize_array(cnn_mask)
     return cnn_mask
 
-def get_position_mask(img_var, use_gaussian=True):
+def get_position_mask(img_var,position_generator, use_gaussian=True):
     position_var = position_generator(img_var)
     position = position_var.cpu().detach().numpy().squeeze()
     position = np.transpose(position, (0, 1))
@@ -115,10 +118,28 @@ def get_position_mask(img_var, use_gaussian=True):
     position = normalize_array(position)
     return position.astype(np.float32)
 
+def get_circle_and_position_mask(img_var,generator,use_gaussian=True):
+    cnn_mask_var, position_var = generator(img_var)
+    cnn_mask = cnn_mask_var.cpu().detach().numpy().squeeze()
+    position = position_var.cpu().detach().numpy().squeeze()
+
+    cnn_mask = np.transpose(cnn_mask, (0, 1))
+    cnn_mask = binarize_array(cnn_mask, 0.5)
+
+
+    position = np.transpose(position, (0, 1))
+    if use_gaussian:
+        position = apply_gaussian_kernel(position, sigma=0.8)
+    _, _, w, h = img_var.shape
+    position = get_image_mask_from_annotation([w, h], position, patch_size)
+    position = normalize_array(position)
+    return cnn_mask,position
+
+
 def morphological_closing(binary_mask):
     # Perform Morphological Closing
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    closed_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel, iterations=11)
+    closed_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel, iterations=7)
     kernel_size = 3
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     # Perform the morphological opening
@@ -130,7 +151,7 @@ def get_binary_mask(network_mask):
  #   Apply Gaussian blur
     blurred_mask = cv2.GaussianBlur(network_mask, (3, 3), 0)
 
-    threshold = 0.1  # This can be adjusted based on your observations
+    threshold = 0.2  # This can be adjusted based on your observations
     _, binary_mask = cv2.threshold(blurred_mask, threshold, 1, cv2.THRESH_BINARY)
     binary_mask = binary_mask.astype(np.uint8)
     return binary_mask
@@ -138,14 +159,16 @@ def get_binary_mask(network_mask):
 def get_cnn_position_mask(cnn_mask,position):
 
     cnn_position_mask = cnn_mask*position
+    # cnn_position_mask = cnn_mask
     binary_mask = get_binary_mask(cnn_position_mask)
-    final_mask = morphological_closing(binary_mask)
+    # final_mask = morphological_closing(binary_mask)
+
     # plt.imshow(1 - binary_mask, cmap='gray')
     # plt.show()
-    return final_mask
+    return binary_mask
 
 
-def get_inpainting_result(mask):
+def get_inpainting_result(inpainter_image,mask):
     mask = torch.from_numpy(mask).unsqueeze(0).unsqueeze(0).to(device)
     inpainter_image_var = torch.from_numpy(inpainter_image).unsqueeze(0).to(device)
     batch = dict(image=inpainter_image_var, mask=mask)
@@ -194,10 +217,15 @@ def fit_points_to_square(points):
         [avg_center[0] - avg_side / 2, avg_center[1] + avg_side / 2]
     ])
     return central_square
-def run_geometric(img,run_square=True,return_radius=False):
-    circles = run_circle_threhold(img, 9, circle_threshold=30, step=5)
+def run_geometric(img,position,run_square=True,return_radius=False):
+    circles = run_circle_threhold(img, 10, circle_threshold=20, step=5)
     re_r = statistics.mode(circles[:,2])
-    circles = run_circle_threhold(img, re_r, circle_threshold=int(2.2*re_r), step=1)
+    circles = run_circle_threhold(img, re_r, circle_threshold=int(2*re_r), step=3)
+    new_circles=[]
+    for x,y,r in circles:
+        # if position[y,x]>0.1:
+        new_circles.append([x,y,r+2])
+    circles = np.asarray(new_circles)
     hough_mask = np.zeros(img.shape[:2])
     hough_mask = get_masked_image(hough_mask, circles)
     if run_square:
@@ -347,6 +375,36 @@ def save_gray_image(array, filename):
     cv2.imwrite(filename, array)
 
 
+def calculate_normalized_iou(mask1, mask2):
+    # Calculate intersection and union
+    mask1 = binarize_array(mask1,0.5)
+    mask2 = binarize_array(mask2, 0.5)
+    # f,a = plt.subplots(1,2)
+    # a[0].imshow(binary_mask1)
+    # a[1].imshow(binary_mask2)
+    # plt.show()
+
+    # Calculate IoU for each class
+    iou_foreground = np.sum(np.logical_and(mask1, mask2)) / np.sum(np.logical_or(mask1, mask2))
+    iou_background = np.sum(np.logical_and(~mask1, ~mask2)) / np.sum(np.logical_or(~mask1, ~mask2))
+
+    # Average IoU
+    average_iou = (iou_foreground + iou_background) / 2
+
+    return iou_foreground,average_iou
+
+def resize_binary_mask(binary_mask, target_shape):
+    # Calculate scaling factors for resizing
+    scale_factors = (np.array(target_shape) / np.array(binary_mask.shape)).tolist()
+
+    # Resize the binary mask using nearest-neighbor interpolation
+    resized_mask = zoom(binary_mask, scale_factors, order=0)
+
+    # Threshold the resized mask to maintain binary values
+    resized_mask[resized_mask >= 0.5] = 1
+    resized_mask[resized_mask < 0.5] = 0
+
+    return resized_mask
 # ------ arguments handling -------
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
@@ -368,14 +426,15 @@ else:
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 # ------ Configure model -------
-# Initialize circle generator
+# # Initialize circle generator
 circle_generator = get_circle_Generator()
 circle_generator.to(device)
-
-# Initialize position generator
-position_generator = get_position_Generator()
-position_generator.to(device)
-
+# # Initialize position generator
+# position_generator = get_position_Generator()
+# position_generator.to(device)
+generator = get_combined_Generator()
+generator.eval()
+generator.to(device)
 # Initial image inpainter
 inpainter_model_path = '/home/huifang/workspace/code/lama/big-lama'
 train_config_path = inpainter_model_path+'/config.yaml'
@@ -394,91 +453,163 @@ transforms_rgb = transforms.Compose([transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 
-test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+# test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+test_image_path = '/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_trainable_fiducial.txt'
+# test_image_path = '/home/huifang/workspace/data/imagelists/st_cytassist.txt'
+
 f = open(test_image_path, 'r')
 files = f.readlines()
 f.close()
 num_files = len(files)
-for i in range(120,num_files,5):
+fiducial_ious=0
+average_ious=0
+cnt=0
+for i in range(0,num_files):
     print(str(num_files)+'---'+str(i))
     start_time = time.time()
     image_name = files[i]
+
     # image_name = '/media/huifang/data/fiducial/original_data/10x/CytAssist/CytAssist_11mm_FFPE_Human_Colorectal_Cancer_spatial/spatial/cytassist_image.tiff'
-    img_pil= Image.open(image_name.split(' ')[0])
-    # level = int(image_name.split(' ')[1])
-    # if level !=2:
+
+    # label_percentage = float(image_name.split(' ')[1])
+    # if label_percentage >0.9:
     #     continue
-    img_var,img_np = get_image_var(img_pil)
+    level = int(image_name.split(' ')[1])
+    # if level ==1:
+    #     continue
+
+    # group = int(image_name.split(' ')[2])
+    # if group!=1:
+    #     continue
+
+    # img_pil= Image.open(image_name.split(' ')[0])
+    # w,h = img_pil.size
+    # left = int(2 * w / 3)
+    # upper = 0
+    # right = w
+    # lower = int(h / 3)
+    # img_pil = img_pil.crop((left, upper, right, lower))
+    # img_pil = img_pil.resize((2080, 2080), Image.ANTIALIAS)
+    #
+    # img_tissue = Image.open(image_name.split(' ')[1].rstrip('\n'))
+    # w, h = img_pil.size
+    # left = int(2*w / 3)
+    # upper = 0
+    # right = w
+    # lower = int(h / 3)
+    # img_tissue = img_tissue.crop((left, upper, right, lower))
+    # # img_tissue = img_tissue.resize((2080, 2080), Image.ANTIALIAS)
+    # img_tissue = np.array(img_tissue)
+    mask_name = image_name.split(' ')[0].split('.')[0] + '_ground_truth.png'
+    mask = plt.imread(mask_name)
+
+
+    img_var,img_np = get_image_var(image_name)
     # img_var = img_var[:,:,:2048,:2048]
     # img_np = img_np[:2048,:2048,:]
 
     # cnn_mask = morphological_closing(get_binary_mask(get_cnn_mask(img_var)))
-    cnn_mask = get_cnn_mask(img_var)
-    position = get_position_mask(img_var,use_gaussian=True)
-    binary_position = binarize_array(position,0.5)
+    # single_cnn_mask = get_cnn_mask(img_var,circle_generator)
+    # position = get_position_mask(img_var,use_gaussian=True)
+    cnn_mask, position = get_circle_and_position_mask(img_var,generator,use_gaussian=True)
+    # cnn_mask_acc = np.resize(cnn_mask, mask.shape)
+    cnn_mask_acc = resize_binary_mask(cnn_mask, mask.shape)
+    fiducial_iou,average_iou = calculate_normalized_iou(mask,cnn_mask_acc)
+    fiducial_ious+=fiducial_iou
+    average_ious+=average_iou
+    cnt+=1
 
+
+    # position = binarize_array(position,0.6)
+    # cnn_mask = get_binary_mask(cnn_mask)
+    # position = get_binary_mask(position)
+    # plt.imshow(cnn_mask)
+    # plt.show()
+    # continue
+
+    # binary_position = binarize_array(position,0.5)
+    # plt.imshow(binary_position)
+    # plt.show()
     # position_square_params = fit_square_to_mask(position)
     # cx, cy, s = position_square_params
     # s = abs(s)
 
-    cnn_position_mask = get_cnn_position_mask(cnn_mask,position)
-    # cnn_mask_circles, cnn_mask_circle_figure, radius = run_geometric(cnn_mask * position, run_square=False,
+    # single_cnn_position_mask = get_cnn_position_mask(single_cnn_mask ,position)
+    cnn_position_mask = get_cnn_position_mask(cnn_mask, position)
+    # cnn_mask_circles, cnn_mask_circle_figure, radius = run_geometric(cnn_mask,position, run_square=False,
     #                                                                   return_radius=True)
+    # cnn_mask=cnn_mask_circle_figure
+    # plt.imshow(cnn_mask_circle_figure)
+    # plt.show()
+    # cnn_mask = cnn_mask_circle_figure
+
 
     inpainter_image = np.transpose(img_np,(2,0,1))
     inpainter_image = inpainter_image.astype('float32')/255
-    cnn_position_output = get_inpainting_result(cnn_position_mask)
+    cnn_position_output = get_inpainting_result(inpainter_image,cnn_position_mask)
+
+
+    single_cnn_output = get_inpainting_result(inpainter_image,cnn_mask)
+    # single_cnn_mask = get_binary_mask(cnn_mask_circle_figure)
+    # direct_output = get_inpainting_result(inpainter_image,single_cnn_mask)
 
     end_time = time.time()
     print(end_time-start_time)
-    cnn_output = get_inpainting_result(cnn_mask)
-    position_output = get_inpainting_result(get_binary_mask(position))
+    # single_cnn_output = get_inpainting_result(single_cnn_mask)
+    # cnn_output = get_inpainting_result(cnn_mask)
+    # save_rgb_image(direct_output,'./temp_result/circle/'+str(i)+'.png')
+    # save_rgb_image(cnn_position_output, './temp_result/network/' + str(i) + '.png')
+    # continue
 
-
-    f,a = plt.subplots(2,4,figsize=(20, 10))
-    a[0,0].imshow(img_np)
-    a[0,1].imshow(1-cnn_mask,cmap='gray')
-    # a[0,1].imshow(1-cnn_mask,cmap='gray')
-    a[0,2].imshow(1-position,cmap='gray')
     #
-    # square = np.array([
-    #     [cx - s / 2, cy - s / 2],
-    #     [cx + s / 2, cy - s / 2],
-    #     [cx + s / 2, cy + s / 2],
-    #     [cx - s / 2, cy + s / 2]
-    # ])
-    # a[0, 2].plot([square[0][1], square[1][1], square[2][1], square[3][1], square[0][1]],[square[0][0], square[1][0], square[2][0], square[3][0], square[0][0]], 'r-')
-    # a[1,0].imshow(masked_img)
-    # bool_mask = cnn_position_mask.astype(bool)
-    # Create an overlay with green color where the mask is True
-    # overlay = np.zeros_like(img_np)
-    # overlay[bool_mask] = [0, 255, 0]  # Green color
-    # Combine the original image and the overlay
-    # alpha = 0.5  # Adjust alpha to control the transparency of the overlay
-    # output = cv2.addWeighted(img_np, 1, overlay, alpha, 0)
-    a[0,3].imshow(1-cnn_position_mask,cmap='gray')
-    a[1,1].imshow(cnn_output)
-    a[1,2].imshow(position_output)
-    a[1, 3].imshow(cnn_position_output)
-    # a[1,1].plot(cnn_central_square[[0, 1, 2, 3, 0], 0], cnn_central_square[[0, 1, 2, 3, 0], 1], c='red')
+    #
+    # f,a = plt.subplots(2,4,figsize=(20, 10))
+    # a[0,0].imshow(img_np)
+    # # a[0,1].imshow(img_tissue)
+    # a[0,1].imshow(1-mask,cmap='gray')
+    # a[0,2].imshow(img_np)
+    # a[0,2].imshow(1-cnn_mask,cmap='binary',alpha=0.6)
+    # a[0,3].imshow(img_np)
+    # a[0,3].imshow(1-position,cmap='binary',alpha=0.6)
+    #
+    # #
+    # # square = np.array([
+    # #     [cx - s / 2, cy - s / 2],
+    # #     [cx + s / 2, cy - s / 2],
+    # #     [cx + s / 2, cy + s / 2],
+    # #     [cx - s / 2, cy + s / 2]
+    # # ])
+    # # a[0, 3].plot([square[0][1], square[1][1], square[2][1], square[3][1], square[0][1]],[square[0][0], square[1][0], square[2][0], square[3][0], square[0][0]], 'r-')
+    # # a[1,0].imshow(masked_img)
+    # # bool_mask = cnn_position_mask.astype(bool)
+    # # Create an overlay with green color where the mask is True
+    # # overlay = np.zeros_like(img_np)
+    # # overlay[bool_mask] = [0, 255, 0]  # Green color
+    # # Combine the original image and the overlay
+    # # alpha = 0.5  # Adjust alpha to control the transparency of the overlay
+    # # output = cv2.addWeighted(img_np, 1, overlay, alpha, 0)
+    # # a[0,3].imshow(1-cnn_position_mask,cmap='gray')
+    # # a[1, 0].imshow(img_np)
+    # # a[1, 0].imshow(1-single_cnn_mask, cmap='binary',alpha=0.5)
+    # a[1, 0].imshow(1 - cnn_position_mask, cmap='gray')
+    # a[1, 1].imshow(cnn_position_output)
+    # # a[1,1].imshow(img_np)
+    # a[1, 2].imshow(1 - cnn_mask, cmap='gray')
+    # a[1,3].imshow(single_cnn_output)
+    #
+    # # a[1,3].imshow(direct_output)
+    # # a[1,1].plot(cnn_central_square[[0, 1, 2, 3, 0], 0], cnn_central_square[[0, 1, 2, 3, 0], 1], c='red')
+    #
+    # # a[1,2].imshow(masked_img_circles_figure)
+    # # a[1, 2].plot(masked_img_central_square[[0, 1, 2, 3, 0], 0], masked_img_central_square[[0, 1, 2, 3, 0], 1], c='red')
+    # plt.show()
+    save_rgb_image(single_cnn_output,'./temp_result/circle/'+str(i)+'.png')
+    # save_rgb_image(direct_output[::-1,:,:], './temp_result/cytassist/' + str(i) + '.png')
+    # test = input()
 
-    # a[1,2].imshow(masked_img_circles_figure)
-    # a[1, 2].plot(masked_img_central_square[[0, 1, 2, 3, 0], 0], masked_img_central_square[[0, 1, 2, 3, 0], 1], c='red')
-    plt.show()
 
+print('over all test iou:')
+print(fiducial_ious/cnt)
+print(average_ious/cnt)
 
-
-    # ------from model------#
-    # mask_var = generator(img_var)
-
-    # img_np = img_np.astype(np.uint8)
-    # mask_np = mask_np.astype(np.uint8)
-    # t1 = time.time()
-    # recovered_image = run(img_np, mask_np, circles)
-    # t2 = time.time()
-    # print('Recover cost %.2f seconds.' % (t2-t1))
-    # save(recovered_image,root_path+dataset_name+'/'+ image_name+'/masks/'+ masktype + '_result.png')
-    # print('current image done')
-    # # plt.imshow(recovered_image)
-    # # plt.show()
 print('current data set done')

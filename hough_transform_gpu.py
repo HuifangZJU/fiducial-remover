@@ -4,7 +4,7 @@ import numpy as np
 import time
 from numba import jit
 from matplotlib import pyplot as plt
-import utils.icp as icp
+# import utils.icp as icp
 from PIL import Image, ImageFilter
 from scipy import stats
 from PIL import Image
@@ -224,27 +224,27 @@ def run_circle_max(image,crop_image,radius,max_n,step=1):
     return circles
 
 
-def get_transposed_fiducials(circles,circles_f,shrink_scale = 0.87, iter=1):
-    transform=[]
-    mean_error = 999
-    circles_f[:,:2] = circles_f[:,:2]*shrink_scale
-    for i in range(iter):
-        num_circle_in_fiducials = circles_f.shape[0]
-        num_circle_in_tissue = circles.shape[0]
-        if num_circle_in_tissue > num_circle_in_fiducials:
-            np.random.shuffle(circles)
-            circle_center_select = circles[:num_circle_in_fiducials, :]
-            circle_center_f_select = circles_f
-        else:
-            np.random.shuffle(circles_f)
-            circle_center_f_select = circles_f[:num_circle_in_tissue, :]
-            circle_center_select = circles
-            # use icp find alignment
-        temp_transform, temp_error = icp.get_icp_transformation(circle_center_select[:,:2], circle_center_f_select[:,:2])
-        if temp_error<mean_error:
-           transform = temp_transform
-    transposed_circle = icp.apply_icp_transformation(circles_f, transform)
-    return transposed_circle.astype(int)
+# def get_transposed_fiducials(circles,circles_f,shrink_scale = 0.87, iter=1):
+#     transform=[]
+#     mean_error = 999
+#     circles_f[:,:2] = circles_f[:,:2]*shrink_scale
+#     for i in range(iter):
+#         num_circle_in_fiducials = circles_f.shape[0]
+#         num_circle_in_tissue = circles.shape[0]
+#         if num_circle_in_tissue > num_circle_in_fiducials:
+#             np.random.shuffle(circles)
+#             circle_center_select = circles[:num_circle_in_fiducials, :]
+#             circle_center_f_select = circles_f
+#         else:
+#             np.random.shuffle(circles_f)
+#             circle_center_f_select = circles_f[:num_circle_in_tissue, :]
+#             circle_center_select = circles
+#             # use icp find alignment
+#         temp_transform, temp_error = icp.get_icp_transformation(circle_center_select[:,:2], circle_center_f_select[:,:2])
+#         if temp_error<mean_error:
+#            transform = temp_transform
+#     transposed_circle = icp.apply_icp_transformation(circles_f, transform)
+#     return transposed_circle.astype(int)
 
 def find_nearest_points(src,dst):
     dst_array = np.repeat(dst[:, :, np.newaxis], src.shape[0], axis=2)
@@ -391,7 +391,7 @@ def save_mask_to_file(image,center,filename):
 # image = plt.imread('../../data/mouse/mouse_hires/posterior_v1.png')
 image = plt.imread('/home/huifang/workspace/data/fiducial_eval/eval/spatial28/tissue_hires_image.png')
 # outputfile = "./alignment/anterior_v2.png"
-fiducials = plt.imread('./data/fiducials.jpeg')
+# fiducials = plt.imread('./data/fiducials.jpeg')
 DEBUG = False
 #humanpilot shrink_scale = 0.87
 SHRINK=0.87
@@ -403,7 +403,7 @@ tiff_radius=55
 he_radius = 12
 fiducial_radius = 15
 circles = run_circle_threhold(image,radius=he_radius,circle_threshold=30)
-circles_f = run_circle_threhold(fiducials,radius=fiducial_radius,circle_threshold=50)
+# circles_f = run_circle_threhold(fiducials,radius=fiducial_radius,circle_threshold=50)
 if not DEBUG:
     output = image.copy()
     for i in range(circles.shape[0]):
@@ -415,69 +415,69 @@ if not DEBUG:
     axarr[0,2].imshow(image)
     axarr[0,2].scatter(circles[:,0],circles[:,1],marker='.',color="red",s=1)
 
-    output_f = fiducials.copy()
-    for i in range(circles_f.shape[0]):
-        cv2.circle(output_f, (circles_f[i, 0], circles_f[i, 1]), circles_f[i, 2], (0, 255, 0), 2)
-    axarr[1,0].imshow(fiducials)
-    axarr[1,1].imshow(output_f)
-    axarr[1,2].imshow(fiducials)
-    axarr[1,2].scatter(circles_f[:,0],circles_f[:,1],marker='.',color="red",s=1)
+    # output_f = fiducials.copy()
+    # for i in range(circles_f.shape[0]):
+    #     cv2.circle(output_f, (circles_f[i, 0], circles_f[i, 1]), circles_f[i, 2], (0, 255, 0), 2)
+    # axarr[1,0].imshow(fiducials)
+    # axarr[1,1].imshow(output_f)
+    # axarr[1,2].imshow(fiducials)
+    # axarr[1,2].scatter(circles_f[:,0],circles_f[:,1],marker='.',color="red",s=1)
     plt.show()
 # -------------------------------------------------------
 #          find alignment to fiducial based on ICP
 # -------------------------------------------------------
-
-transposed_fiducial = get_transposed_fiducials(circles,circles_f,shrink_scale =SHRINK,iter=50)
-
-mask = np.ones(image.shape[0:2])
-save_mask_to_file(mask,transposed_fiducial,'151507_mask_template.png')
-print("done")
-test = input()
-indices, distance = find_nearest_points(circles[:,:2],transposed_fiducial[:,:2])
-
-
-if not DEBUG:
-    f2, axarr2 = plt.subplots(1,3)
-    plt.setp(axarr2, xticks=[], yticks=[])
-    axarr2[0].scatter(circles[:, 0], circles[:, 1])
-    axarr2[0].axis('equal')
-    axarr2[1].scatter(circles[:, 0], circles[:, 1])
-    axarr2[1].scatter(transposed_fiducial[:, 0], transposed_fiducial[:, 1])
-    axarr2[1].axis('equal')
-    output_fiducial = image.copy()
-    for i in range(transposed_fiducial.shape[0]):
-        cv2.circle(output_fiducial, (transposed_fiducial[i, 0], transposed_fiducial[i, 1]), fiducial_radius, (0, 255, 0), 2)
-    axarr2[2].imshow(output)
-    plt.show()
-
-# -------------------------------------------------------
-#         find new circle centers based on alignment
-# -------------------------------------------------------
-new_center, aligned_center,refined_center, missed_fiducial = \
-    get_refined_centers(circles,transposed_fiducial,distance,indices,distance_threshold=he_radius)
-
-
-
-if DEBUG:
-    aligned_output = image.copy()
-    aligned_output_refine = image.copy()
-    for i in range(aligned_center.shape[0]):
-        cv2.circle(aligned_output, (aligned_center[i, 0], aligned_center[i, 1]), aligned_center[i, 2], (0, 250, 0),2)
-    for i in range( missed_fiducial.shape[0]):
-        cv2.circle(aligned_output, (missed_fiducial[i, 0],  missed_fiducial[i, 1]),  missed_fiducial[i, 2],(255, 0, 0), 2)
-    for i in range(refined_center.shape[0]):
-        cv2.circle(aligned_output, (refined_center[i, 0], refined_center[i, 1]), refined_center[i, 2], (0, 0, 255), 2)
-    for i in range(new_center.shape[0]):
-        cv2.circle(aligned_output_refine, (new_center[i,0], new_center[i,1]), new_center[i,2], (0,250,0), 2)
-    # f = plt.figure(figsize=(30,30))
-    # plt.imshow(aligned_output_refine)
-    # plt.savefig(output)
-    # print("done")
-    f3, axarr3 = plt.subplots(1,2)
-    plt.setp(axarr3, xticks=[], yticks=[])
-    axarr3[0].imshow(aligned_output)
-    axarr3[1].imshow(aligned_output_refine)
-    plt.show()
+#
+# transposed_fiducial = get_transposed_fiducials(circles,circles_f,shrink_scale =SHRINK,iter=50)
+#
+# mask = np.ones(image.shape[0:2])
+# save_mask_to_file(mask,transposed_fiducial,'151507_mask_template.png')
+# print("done")
+# test = input()
+# indices, distance = find_nearest_points(circles[:,:2],transposed_fiducial[:,:2])
+#
+#
+# if not DEBUG:
+#     f2, axarr2 = plt.subplots(1,3)
+#     plt.setp(axarr2, xticks=[], yticks=[])
+#     axarr2[0].scatter(circles[:, 0], circles[:, 1])
+#     axarr2[0].axis('equal')
+#     axarr2[1].scatter(circles[:, 0], circles[:, 1])
+#     axarr2[1].scatter(transposed_fiducial[:, 0], transposed_fiducial[:, 1])
+#     axarr2[1].axis('equal')
+#     output_fiducial = image.copy()
+#     for i in range(transposed_fiducial.shape[0]):
+#         cv2.circle(output_fiducial, (transposed_fiducial[i, 0], transposed_fiducial[i, 1]), fiducial_radius, (0, 255, 0), 2)
+#     axarr2[2].imshow(output)
+#     plt.show()
+#
+# # -------------------------------------------------------
+# #         find new circle centers based on alignment
+# # -------------------------------------------------------
+# new_center, aligned_center,refined_center, missed_fiducial = \
+#     get_refined_centers(circles,transposed_fiducial,distance,indices,distance_threshold=he_radius)
+#
+#
+#
+# if DEBUG:
+#     aligned_output = image.copy()
+#     aligned_output_refine = image.copy()
+#     for i in range(aligned_center.shape[0]):
+#         cv2.circle(aligned_output, (aligned_center[i, 0], aligned_center[i, 1]), aligned_center[i, 2], (0, 250, 0),2)
+#     for i in range( missed_fiducial.shape[0]):
+#         cv2.circle(aligned_output, (missed_fiducial[i, 0],  missed_fiducial[i, 1]),  missed_fiducial[i, 2],(255, 0, 0), 2)
+#     for i in range(refined_center.shape[0]):
+#         cv2.circle(aligned_output, (refined_center[i, 0], refined_center[i, 1]), refined_center[i, 2], (0, 0, 255), 2)
+#     for i in range(new_center.shape[0]):
+#         cv2.circle(aligned_output_refine, (new_center[i,0], new_center[i,1]), new_center[i,2], (0,250,0), 2)
+#     # f = plt.figure(figsize=(30,30))
+#     # plt.imshow(aligned_output_refine)
+#     # plt.savefig(output)
+#     # print("done")
+#     f3, axarr3 = plt.subplots(1,2)
+#     plt.setp(axarr3, xticks=[], yticks=[])
+#     axarr3[0].imshow(aligned_output)
+#     axarr3[1].imshow(aligned_output_refine)
+#     plt.show()
 
 
 # mask = np.ones(image.shape)

@@ -1,5 +1,5 @@
 import os
-
+import json
 import numpy as np
 from matplotlib import pyplot as plt
 import cv2
@@ -9,7 +9,9 @@ from hough_utils import *
 from fiducial_utils import *
 from skimage.draw import disk
 import math
+import matplotlib.patches as patches
 import random
+import statistics
 # SAVE_ROOT = '/media/huifang/data/fiducial/annotation/'
 SAVE_ROOT = '/media/huifang/data/fiducial/Fiducial_colab/Fiducial_colab/'
 def get_annotated_circles(annotation_path):
@@ -23,14 +25,23 @@ def get_annotated_circles(annotation_path):
 
     return in_circle_meta, out_circle_meta
 
-def plot_circles_in_image(image,in_tissue_circles,out_tissue_circles, width):
+def plot_color_circles_in_image(image,in_tissue_circles,out_tissue_circles, hard_circles,width):
 
-    # for circle in in_tissue_circles:
-    #     cv2.circle(image, (circle[0],circle[1]), circle[2],[255,0,0], width)
+    for circle in in_tissue_circles:
+        cv2.circle(image, (circle[0],circle[1]), circle[2],[255,0,0], width)
 
     for circle in out_tissue_circles:
 
         cv2.circle(image, (circle[0],circle[1]), circle[2], [0, 255, 0], width)
+    for circle in hard_circles:
+        cv2.circle(image, (circle[0], circle[1]), circle[2], [0, 0, 255], width)
+    return image
+
+def plot_circles_in_image(image,circles,width):
+
+    for circle in circles:
+        cv2.circle(image, (circle[0],circle[1]), circle[2],[255,0,0], width)
+
     return image
 
 def show_grids(image, cnt):
@@ -145,9 +156,85 @@ def annotate_patches(image_size, patch_size, circles):
     # neighbor_count = convolve2d(annotation, kernel, mode='same')
     return annotation
 
+def get_shape_from_annotation_path(fileid):
+    # Replace with the path to your JSON file
+    labelme_json_path =  './location_annotation/'+str(fileid) +'.json'
+
+    # Read the JSON file
+    with open(labelme_json_path, 'r') as file:
+        labelme_data = json.load(file)
+
+    # Initialize variables to store the 'outer' and 'inner' polygons
+    outer_polygon = None
+    inner_polygon = None
+
+    # Parse the JSON data for 'outer' and 'inner' polygon information
+    for shape in labelme_data['shapes']:
+        if shape['label'].lower() == 'outer' and shape['shape_type'] == 'polygon':
+            # Assuming polygons are represented by 4 points (x, y)
+            outer_polygon = np.array(shape['points'], dtype=np.int32)
+        elif shape['label'].lower() == 'inner' and shape['shape_type'] == 'polygon':
+            # Assuming polygons are represented by 4 points (x, y)
+            inner_polygon = np.array(shape['points'], dtype=np.int32)
+    # Now `bounding_boxes` contains all the bounding box information
+    return outer_polygon,inner_polygon
+
+
+def calculate_distance2(point1, point2):
+    """Calculate the Euclidean distance between two points."""
+    return np.linalg.norm(np.array(point1) - np.array(point2))
+
+def read_hard_circles_from_json(json_file):
+    with open(json_file, 'r') as file:
+        data = json.load(file)
+
+    circles = []
+    for shape in data['shapes']:
+        if shape['label'] == 'circle':
+            center = np.array(shape['points'][0])
+            circumference_point = np.array(shape['points'][1])
+
+            # Calculate the radius
+            radius = calculate_distance2(center, circumference_point)
+            center_with_radius = np.append(center, radius)
+
+            circles.append(np.append(center_with_radius, 2))
+    circles = np.asarray(circles).astype(int)
+    return circles
+
+def get_position_mask(img_size,i):
+    outer_polygon, inner_polygon = get_shape_from_annotation_path(i)
+    mask = np.zeros(img_size, dtype=np.uint8)
+    cv2.fillPoly(mask, [outer_polygon], color=1)
+    # Fill the inner polygon with zeros (black) to create the ring effect
+    cv2.fillPoly(mask, [inner_polygon], color=0)
+    mask = mask.astype(float)
+    return mask
+
+def divide_mask_into_patches(mask, patch_size):
+
+    height, width = mask.shape
+
+    # Calculate the number of patches in both dimensions
+    num_patches_x = width // patch_size
+    num_patches_y = height // patch_size
+
+    # Initialize an array to store the patch labels
+    patch_labels = np.zeros((num_patches_y, num_patches_x), dtype=np.uint8)
+
+    # Iterate over the mask and label each patch
+    for y in range(num_patches_y):
+        for x in range(num_patches_x):
+            patch = mask[y * patch_size:(y + 1) * patch_size, x * patch_size:(x + 1) * patch_size]
+            label = 1 if np.any(patch == 1) else 0
+            patch_labels[y, x] = label
+
+    return patch_labels
 
 def get_circles_from_annotation_path(image_name):
     annotation_path = get_annotation_path(image_name)
+    print(annotation_path)
+
     # if not os.path.exists(annotation_path):
     #     continue
     in_tissue_circles, out_tissue_circles = get_annotated_circles(annotation_path)
@@ -156,14 +243,15 @@ def get_circles_from_annotation_path(image_name):
     if len(unique_pairs_below_threshold(out_tissue_circles, 10)) > 0:
         out_tissue_circles = remove_overlapping_circles(out_tissue_circles, 10)
     circles = in_tissue_circles + out_tissue_circles
-    # np.save(image_name.split('.')[0] + '.npy', circles)
-    return in_tissue_circles,out_tissue_circles,circles
+
+    return in_tissue_circles,out_tissue_circles,np.asarray(circles)
 
 def get_circles_from_file(image_name):
     circles = np.load(image_name.split('.')[0]+'.npy')
     in_tissue_circles = [circle for circle in circles if circle[-1] == 1]
     out_tissue_circles = [circle for circle in circles if circle[-1] == 0]
-    return in_tissue_circles,out_tissue_circles,circles
+    hard_circles = [circle for circle in circles if circle[-1] == 2]
+    return in_tissue_circles,out_tissue_circles,hard_circles,circles
 
 def annotate_continuous_patches(image_size, patch_size, circles):
 
@@ -211,6 +299,15 @@ def rectangles_intersect(rect1, rect2):
     x2, y2, w2, h2 = rect2
 
     return not (x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1)
+
+def random_select_percentage_elements(input_array, percent_to_select):
+    num_to_select = int((percent_to_select / 100) * input_array.shape[0])
+    selected_indices = np.random.choice(input_array.shape[0], num_to_select, replace=False)
+    selected_elements = input_array[selected_indices]
+    return selected_elements
+
+
+
 
 def get_annotation_path(imagepath):
     dataset = imagepath.split('/')[6]
@@ -273,16 +370,17 @@ f = open(source_images, 'r')
 fiducial_images = f.readlines()
 SAVE_FILE = False
 if SAVE_FILE:
-    imagelist_path = '/home/huifang/workspace/data/imagelists/st_upsample_trainable_images_final.txt'
+    imagelist_path = '/home/huifang/workspace/data/imagelists/st_upsample_trainable_images_final_with_location_frame.txt'
     f_list = open(imagelist_path,'w')
 
 width = 2
-patch_size = 32
+patch_size = 16
 in_cnt=0
 out_cnt=0
 for i in range(0,len(fiducial_images)):
     # if i in badfile:
     #     continue
+
 
     image_name = fiducial_images[i].split(' ')[0]
     groupid = fiducial_images[i].split(' ')[2]
@@ -291,40 +389,81 @@ for i in range(0,len(fiducial_images)):
 
     print(str(len(fiducial_images))+'---'+str(i))
     image = plt.imread(image_name)
+    print(image_name)
 
-
+    # circles = run_circle_threhold(image, 8, circle_threshold=30, step=5)
+    # re_r = statistics.mode(circles[:, 2])
+    # circles = run_circle_threhold(image, re_r, circle_threshold=int(2.8 * re_r), step=3)
 
     # in_tissue_circles,out_tissue_circles,circles = get_circles_from_annotation_path(image_name)
-    in_tissue_circles, out_tissue_circles, circles = get_circles_from_file(image_name)
-    in_tissue_percentage = len(in_tissue_circles)/len(circles)
+    # if os.path.exists('./circle_annotation/'+str(i)+'.json'):
+    #     hard_circles = read_hard_circles_from_json('./circle_annotation/'+str(i)+'.json')
+    # else:
+    #     continue
+    # circles = np.vstack((circles, hard_circles))
+    # np.save(image_name.split('.')[0] + '.npy', circles)
+    # print('saved')
 
-    times = max(int(in_tissue_percentage*20),1)
-    for _ in range(times):
-        f_list.write(fiducial_images[i])
+    # continue
+    in_tissue_circles, out_tissue_circles, hard_circles,circles = get_circles_from_file(image_name)
+    circles = random_select_percentage_elements(circles, 10)
+
+
+    # in_tissue_percentage = len(in_tissue_circles)/len(circles)
+    # outer_polygon, inner_polygon = get_shape_from_annotation_path(i)
+    # array1_str = np.array2string(outer_polygon, separator=',').replace('\n', '').replace(' ', '')
+    # array2_str = np.array2string(inner_polygon, separator=',').replace('\n', '').replace(' ', '')
+
+
+    # print(outer_polygon)
+    # print(inner_polygon)
+    # test = input()
+    # times = max(int(in_tissue_percentage*20),1)
+    # for _ in range(times):
+    #     img_info = fiducial_images[i]
+    #     img_info = img_info.rstrip('\n')
+    #     f_list.write(f"{img_info} {array1_str} {array2_str}\n")
 
 
 
-    # mask = generate_mask(image.shape[:2], circles, -1)
+    mask = generate_mask(image.shape[:2], circles, -1)
     # sum = np.sum(mask)
     # print(sum/(mask.shape[0]*mask.shape[1]))
     # test = input()
     # mask = generate_weighted_mask(image.shape[:2], in_tissue_circles,out_tissue_circles,2)
-    # plt.imshow(mask)
+    # plt.imshow(image)
+    # plt.imshow(1-mask,cmap='binary',alpha=0.6)
     # plt.show()
 
-    # save_image(mask, image_name.split('.')[0] + '_mask_solid.png', format="L")
+    save_image(mask, image_name.split('.')[0] + '_10_percent.png', format="L")
+    continue
 
     # Visualization
+    # annotation_image = get_position_mask(image.shape[:2], i)
+    # patches = divide_mask_into_patches(annotation_image, patch_size)
+    # plt.imshow(patches)
+    # plt.show()
     # patches = annotate_patches(image.shape[:2], patch_size,circles)
     # annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
     # continuous_patch = annotate_continuous_patches(image.shape[:2], 32,circles)
-    # image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,width)
-    # f,a = plt.subplots(1,2,figsize=(16, 8))
-    # # plt.figure(figsize=(8, 8))
-    # a[0].imshow(image)
-    # a[0].imshow(annotation_image, cmap='binary', alpha=0.5)
-    # a[1].imshow(continuous_patch)
-    # plt.show()
+
+    image = image*255
+    image = image.astype(np.uint8)
+    image_cp = image.copy()
+    # image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,hard_circles,width)
+    image = plot_circles_in_image(image,circles, width)
+    # test = input()
+
+    # save_image(image,'./circle_annotation/'+str(i)+'.png')
+
+
+    #
+    f,a = plt.subplots(1,2,figsize=(20, 10))
+    # a[0].figure(figsize=(12, 12))
+    a[0].imshow(image_cp)
+    a[0].imshow(1-mask, cmap='binary', alpha=0.6)
+    a[1].imshow(image)
+    plt.show()
 
 
     # if SAVE_FILE:
