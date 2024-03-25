@@ -2,7 +2,8 @@ import glob
 
 # Define the root directory and pattern
 root_dir = '/media/huifang/data/fiducial/original_data/10x/CytAssist/'  # Replace with your root directory path
-pattern = '*/spatial/cytassist_image.tiff'
+# pattern = '*/spatial/cytassist_image.tiff'
+pattern = '*/spatial/cytassist_image_cropped.png'
 pattern2 = '*/spatial/tissue_hires_image.png'
 # Use glob to find all files matching the pattern
 image_paths = glob.glob(f'{root_dir}/{pattern}')

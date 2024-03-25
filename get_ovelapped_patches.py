@@ -11,10 +11,12 @@ def process_annotations(src_folder,img_folder, dest_folder, json_range):
         with open(json_path, 'r') as file:
             data = json.load(file)
         image_path = os.path.join(img_folder, data['imagePath'])
+        if not os.path.exists(image_path):
+            continue
         image = cv2.imread(image_path)
 
         for j, shape in enumerate(data['shapes']):
-            if shape['label'] == 'overlap' and shape['shape_type'] == 'rectangle':
+            if shape['label'] == 'hough_bad' and shape['shape_type'] == 'rectangle':
                 points = shape['points']
                 x1, y1 = int(points[0][0]), int(points[0][1])
                 x2, y2 = int(points[1][0]), int(points[1][1])
@@ -26,10 +28,10 @@ def process_annotations(src_folder,img_folder, dest_folder, json_range):
                     # Divide the rectangle into smaller patches
                     patches = divide_into_patches(rect, aspect_ratio)
                     for k, patch in enumerate(patches):
-                        patch_path = os.path.join(dest_folder, f"{i}_{j}_{k}.png")
+                        patch_path = os.path.join(dest_folder, f"{i}_{j}_{k}_orig.png")
                         cv2.imwrite(patch_path, patch)
                 else:
-                    patch_path = os.path.join(dest_folder, f"{i}_{j}.png")
+                    patch_path = os.path.join(dest_folder, f"{i}_{j}_orig.png")
                     cv2.imwrite(patch_path, rect)
 
 
@@ -53,9 +55,9 @@ def divide_into_patches(rect, aspect_ratio):
     return patches
 
 # Example usage
-src_folder = '/home/huifang/workspace/code/fiducial_remover/overlap_annotation/'  # Update this path
-img_folder= '/home/huifang/workspace/code/fiducial_remover/temp_result/circle/'
-dest_folder = '/home/huifang/workspace/code/fiducial_remover/temp_result/overlap_patch/'  # Update this path
+src_folder = '/home/huifang/workspace/code/fiducial_remover/temp_result/method/hough_detection/'  # Update this path
+img_folder= '/home/huifang/workspace/code/fiducial_remover/location_annotation/'
+dest_folder = '/home/huifang/workspace/code/fiducial_remover/temp_result/method/comparison/hough_bad/'  # Update this path
 json_range = 167  # Number of json files
 
 process_annotations(src_folder,img_folder,dest_folder, json_range)

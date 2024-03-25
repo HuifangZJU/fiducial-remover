@@ -41,9 +41,9 @@ def get_separate_images(path,i):
     # m = image1[:, :1024, :]
     # w = image1[:, 1024:2048, :]
     # f = image1[:, 2048:, :]
-    m = image1[:, :1408, :]
-    w = image1[:, 1408:2816, :]
-    f = image1[:, 2816:, :]
+    m = image1[:, :1024, :]
+    w = image1[:, 1024:2048, :]
+    f = image1[:, 2048:, :]
     return m,w,f
 def get_blended_image(image1,image2):
     image1 = cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY)
@@ -58,12 +58,12 @@ def get_blended_image(image1,image2):
 
 # image_path1 = '/home/huifang/workspace/code/fiducial_remover/temp_result/registration/bUnwarpJ/with_fiducial/'
 # image_path2 = '/home/huifang/workspace/code/fiducial_remover/temp_result/registration/bUnwarpJ/without_fiducial/'
-image_path1='/home/huifang/workspace/code/voxelmorph/results/with_fiducial/all/'
-image_path2='/home/huifang/workspace/code/voxelmorph/results/without_fiducial/all/'
+image_path1='/home/huifang/workspace/code/voxelmorph/results/cytassist/with_fiducial/'
+image_path2='/home/huifang/workspace/code/voxelmorph/results/cytassist/without_fiducial/'
 
 
 
-for i in range(25,40):
+for i in range(1,28,2):
     print(i)
     #
     # img1 = plt.imread(image_path1+str(i)+'.png')

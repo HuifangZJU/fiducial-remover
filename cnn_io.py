@@ -29,17 +29,25 @@ def get_position_Generator():
     return generator
 
 def get_combined_Generator():
-    generator = Rich_Parrel_Attention_Generator(with_skip_connection=True)
-    # generator = Dual_Attention_Generator()
-    # generator.load_state_dict((torch.load('/media/huifang/data/experiment/pix2pix/saved_models/final_upsample_rich_attn_inparrel_unet_with_skip_select_full_images/g_400.pth')))
+    # generator = CNN_in_parrel_Generator()
     # generator.load_state_dict((torch.load(
-    #     '/media/huifang/data/experiment/pix2pix/saved_models/final_loss_focal_rich_attn_inparrel_unet/g_400.pth')))
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_pure_cnn_0layer_with_binary_with_spatial/g_1400.pth')))
+    # generator = Attention_Generator()
+    # generator.load_state_dict((torch.load(
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_attn_net_5layer/g_800.pth')))
+
+
+    generator = Rich_Parrel_Attention_Generator()
+    # generator.load_state_dict((torch.load(
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_annotation_circle_only/g_600.pth')))
     generator.load_state_dict((torch.load(
-        '/media/huifang/data/experiment/pix2pix/saved_models/final_solid3_circle_ground_truth/g_600.pth')))
+        '/media/huifang/data/experiment/pix2pix/saved_models/auto_circle_binary_spatial_selected_mask_5layer_renewed/g_1600.pth')))
     # generator.load_state_dict((torch.load(
-    #     '/media/huifang/data/experiment/pix2pix/saved_models/final_loss_0.95alpha_focal_rich_attn_inparrel_unet/g_600.pth')))
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/ground_truth_circle_only/g_600.pth')))
+
     # generator.load_state_dict((torch.load(
-    #     '/media/huifang/data/experiment/pix2pix/saved_models/final_solid_loss_focal/g_800.pth')))
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_circle_binary_selected_mask_5layer/g_800.pth')))
+
 
     return generator
 

@@ -75,11 +75,33 @@ def calculate_correlation_coefficient(image1, image2):
 
     return correlation_coefficient
 
-def read_images(path):
-    img_path1 = path + str(i) + '/' + str(id1) + '.png'
-    img_path2 = path + str(i) + '/' + str(id2) + '.png'
+def read_images(path,i):
+    img_path1 = path + str(i) + '/' + str(i) + '_with_fiducial_resized.png'
+    img_path2 = path + str(i)+'/'+str(i)+'_tissue.png'
     registered_img_path1 = path + str(i) + '/Registered Source Image.png'
     registered_img_path2 = path + str(i) + '/Registered Target Image.png'
+    # print(img_path1)
+    # print(img_path2)
+    # print(registered_img_path1)
+    # print(registered_img_path2)
+    # test = input()
+
+    image1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE)
+    image2 = cv2.imread(img_path2, cv2.IMREAD_GRAYSCALE)
+    registered_image1 = cv2.imread(registered_img_path1, cv2.IMREAD_GRAYSCALE)
+    registered_image2 = cv2.imread(registered_img_path2, cv2.IMREAD_GRAYSCALE)
+    return image1,image2,registered_image1,registered_image2
+
+def read_images2(path,i):
+    img_path1 = path + str(i) + '/' + str(i) + '_without_fiducial_resized.png'
+    img_path2 = path + str(i)+'/'+str(i)+'_tissue.png'
+    registered_img_path1 = path + str(i) + '/Registered Source Image.png'
+    registered_img_path2 = path + str(i) + '/Registered Target Image.png'
+    # print(img_path1)
+    # print(img_path2)
+    # print(registered_img_path1)
+    # print(registered_img_path2)
+    # test = input()
 
     image1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE)
     image2 = cv2.imread(img_path2, cv2.IMREAD_GRAYSCALE)
@@ -89,46 +111,48 @@ def read_images(path):
 
 def get_separate_images(path,i):
     image1 = cv2.imread(path + str(i)+'_m_w_f.png', cv2.IMREAD_GRAYSCALE)
-    # m = image1[:, :1024, :]
-    # w = image1[:, 1024:2048, :]
-    # f = image1[:, 2048:, :]
-    m = image1[:, :1408]
-    w = image1[:, 1408:2816]
-    f = image1[:, 2816:]
+    m = image1[:, :1024]
+    w = image1[:, 1024:2048]
+    f = image1[:, 2048:]
+    # m = image1[:, :1408]
+    # w = image1[:, 1408:2816]
+    # f = image1[:, 2816:]
     # plt.imshow(f)
     # plt.show()
 
 
     return m,w,f
 # Example usage
-# with_fiducial_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/registration/with_fiducial/'
-# without_fiducial_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/registration/without_fiducial/'
+with_fiducial_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/cytassist/with_fiducial/'
+without_fiducial_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/cytassist/without_fiducial/'
 
-with_fiducial_path='/home/huifang/workspace/code/voxelmorph/results/with_fiducial/all/'
-without_fiducial_path ='/home/huifang/workspace/code/voxelmorph/results/without_fiducial/all/'
+# with_fiducial_path='/home/huifang/workspace/code/voxelmorph/results/cytassist/with_fiducial/'
+# without_fiducial_path ='/home/huifang/workspace/code/voxelmorph/results/cytassist/without_fiducial/'
 
 
 metric_with_fiducial=0
 metric_without_fiducial=0
-for i in range(0,40):
+for i in range(0,15):
     print(i)
+    if i ==2:
+        continue
     # image_id = registration_pair[i]
     # id1 = image_id[0]
     # id2 = image_id[1]
-    # image1,image2,registered_image1,registered_image2 = read_images(with_fiducial_path)
-    # image1_nf, image2_nf, registered_image1_nf, registered_image2_nf = read_images(without_fiducial_path)
-    #
-    # metric_with_fiducial += calculate_ssim(image1, registered_image1)
+    image1,image2,registered_image1,registered_image2 = read_images(with_fiducial_path,i)
+    image1_nf, image2_nf, registered_image1_nf, registered_image2_nf = read_images2(without_fiducial_path,i)
+
+    metric_with_fiducial += calculate_ssim(image1, registered_image1)
     # metric_with_fiducial +=calculate_ssim(image2, registered_image2)
-    #
-    # metric_without_fiducial += calculate_ssim(image1_nf, registered_image1_nf)
+
+    metric_without_fiducial += calculate_ssim(image1_nf, registered_image1_nf)
     # metric_without_fiducial += calculate_ssim(image2_nf, registered_image2_nf)
-    m1, w1, f1 = get_separate_images(with_fiducial_path, i)
-    m2, w2, f2 = get_separate_images(without_fiducial_path, i)
-    metric_with_fiducial += calculate_ssim(w1,f1)
-    metric_without_fiducial += calculate_ssim(w2, f2)
+    # m1, w1, f1 = get_separate_images(with_fiducial_path, i)
+    # m2, w2, f2 = get_separate_images(without_fiducial_path, i)
+    # metric_with_fiducial += calculate_ssim(w1,f1)
+    # metric_without_fiducial += calculate_ssim(w2, f2)
 
 
 
-print(metric_with_fiducial/40)
-print(metric_without_fiducial/40)
+print(metric_with_fiducial/14)
+print(metric_without_fiducial/14)

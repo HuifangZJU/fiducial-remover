@@ -2,10 +2,23 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+import json
 from scipy import ndimage
 from skimage import io, color, filters
 # Load an H&E stained image
-
+def read_labelme_json(json_file, image_shape, scale,label='tissue'):
+    with open(json_file) as file:
+        data = json.load(file)
+    mask = np.zeros(image_shape[:2], dtype=np.uint8)  # Assuming grayscale mask
+    for shape in data['shapes']:
+        if shape['label'] == label:
+            polygon = np.array(shape['points'])
+            polygon[: ,0] = polygon[:, 0]*scale[0]
+            polygon[:, 1] = polygon[:, 1] * scale[1]
+            polygon = np.asarray(polygon,dtype=np.int32)
+            cv2.fillPoly(mask, [polygon], color=255)
+    mask = (mask > 128)
+    return mask
 
 def find_nearest_multiple_of_32(x):
     base = 32
@@ -14,6 +27,14 @@ def find_nearest_multiple_of_32(x):
         return x
     else:
         return x + (base - remainder)
+
+def calculate_iou(mask1, mask2):
+    intersection = np.logical_and(mask1, mask2)
+    union = np.logical_or(mask1, mask2)
+    iou_score = np.sum(intersection) / np.sum(union)
+    return iou_score
+
+
 
 def get_mask(path):
     img_pil = Image.open(path)
@@ -29,7 +50,7 @@ def get_mask(path):
 
     return mask
 
-def get_image(path):
+def get_image(path,return_ratio=False):
     img_pil = Image.open(path)
     h, w = img_pil.size
     h_new = find_nearest_multiple_of_32(h)
@@ -38,7 +59,21 @@ def get_image(path):
     image = np.array(img_pil)
     # Normalize the image if necessary
     image = image / 255.0 if np.max(image) > 1 else image
-    return image
+    if return_ratio:
+        return image,h_new/h,w_new/w
+    else:
+        return image
+
+def dice_coefficient(y_true, y_pred):
+    """
+    Compute the Dice Coefficient.
+    :param y_true: Ground truth (binary).
+    :param y_pred: Predictions (binary).
+    :return: Dice coefficient.
+    """
+    intersection = np.sum(y_true * y_pred)
+    return (2. * intersection) / (np.sum(y_true) + np.sum(y_pred))
+
 
 def get_overlayed_image(image,mask):
     # Create a color mask
@@ -57,12 +92,13 @@ f.close()
 # for line in files:
 #     img = line.split(' ')[0]
 cleaned_image_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/circle/'
+annotation_path = '/home/huifang/workspace/code/fiducial_remover/location_annotation/'
 mask_path1 = '/home/huifang/workspace/code/backgroundremover/bgrm_direct_out/'
 mask_path2 = '/home/huifang/workspace/code/backgroundremover/bgrm_out/'
-for i in range(101,167):
-    print(i)
-
-
+iou1=0
+iou2=0
+cnt=0
+for i in range(0,167):
     # img = image_path+str(i)+'.png'
     # print(files[i])
     # test = input()
@@ -70,30 +106,47 @@ for i in range(101,167):
     if level ==1:
         continue
 
-    image_orig = get_image(files[i].split(' ')[0])
-    cleaned_image = get_image(cleaned_image_path+str(i)+'.png')
+    image_orig,h_scale,w_scale = get_image(files[i].split(' ')[0],return_ratio=True)
 
+    cleaned_image = get_image(cleaned_image_path+str(i)+'.png')
 
     mask1 = get_mask(mask_path1+str(i)+'.png')
     mask2 = get_mask(mask_path2 + str(i) + '.png')
 
+    ground_truth = read_labelme_json(annotation_path+str(i)+'.json',mask1.shape,[h_scale,w_scale])
+    if np.max(ground_truth)==0:
+        continue
+
+    iou1 +=dice_coefficient(mask1, ground_truth)
+    iou2 += dice_coefficient(mask2, ground_truth)
+    cnt +=1
+    #
+    #
     overlayed_image1 = get_overlayed_image(image_orig,mask1)
     overlayed_image2 = get_overlayed_image(cleaned_image,mask2)
+    overlayed_image3 = get_overlayed_image(image_orig,ground_truth)
 
     # Display the original image and the overlayed image
-    plt.figure(figsize=(18, 6))
+    plt.figure(figsize=(18, 18))
 
-    plt.subplot(1,3, 1)
+    plt.subplot(2,2, 1)
     plt.imshow(image_orig)
     plt.title('Original Image')
     plt.axis('off')
 
-    plt.subplot(1, 3, 2)
+    plt.subplot(2, 2, 2)
+    plt.imshow(overlayed_image3)
+    plt.title('Tissue segmentation ground truth')
+    plt.axis('off')
+
+    plt.subplot(2, 2, 3)
     plt.imshow(overlayed_image1)
     plt.title('Tissue segmentation with fiducial markers')
     plt.axis('off')
 
-    plt.subplot(1, 3, 3)
+
+
+    plt.subplot(2, 2, 4)
     plt.imshow(overlayed_image2)
     plt.title('Tissue segmentation without fiducial markers')
     plt.axis('off')
@@ -147,3 +200,6 @@ for i in range(101,167):
     # # Display the result
     # io.imshow(segmented_image)
     # io.show()
+
+print(iou1/cnt)
+print(iou2/cnt)

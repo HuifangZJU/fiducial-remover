@@ -299,7 +299,7 @@ def getBluredImg(original_image):
 def getEdgedImg(blur_image,style):
     if style == "canny":
         # tiff: (250, 380), hires:(180,50)
-        edged_image = cv2.Canny(blur_image, 180, 50)
+        edged_image = cv2.Canny(blur_image, 200,180)
     else:
         assert(style == "Image")
         blur_image = Image.fromarray(blur_image.astype(np.uint8))
@@ -386,7 +386,7 @@ def run_circle_threhold(original_image,_radius_,circle_threshold,edgemethod="can
 def generate_mask(image_size,circles,circle_width):
     mask = np.zeros(image_size)
     for i in range(circles.shape[0]):
-        cv2.circle(mask, (circles[i, 0], circles[i, 1]), circles[i, 2]+3, 1, circle_width)
+        cv2.circle(mask, (circles[i, 0], circles[i, 1]), circles[i, 2], 1, circle_width)
     return mask
 
 def generate_weighted_mask(image_size,in_tissue_circles,out_tissue_circles,circle_width):

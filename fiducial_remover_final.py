@@ -21,7 +21,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 def get_image_mask_from_annotation(image_size,annotation,step):
     image_mask = np.zeros(image_size)
-
     for i in range(annotation.shape[0]):
         for j in range(annotation.shape[1]):
             patch_x = i * step
@@ -120,19 +119,20 @@ def get_position_mask(img_var,position_generator, use_gaussian=True):
 
 def get_circle_and_position_mask(img_var,generator,use_gaussian=True):
     cnn_mask_var, position_var = generator(img_var)
+    # cnn_mask_var = generator(img_var)
     cnn_mask = cnn_mask_var.cpu().detach().numpy().squeeze()
-    position = position_var.cpu().detach().numpy().squeeze()
-
     cnn_mask = np.transpose(cnn_mask, (0, 1))
     cnn_mask = binarize_array(cnn_mask, 0.5)
 
-
+    position = position_var.cpu().detach().numpy().squeeze()
     position = np.transpose(position, (0, 1))
     if use_gaussian:
         position = apply_gaussian_kernel(position, sigma=0.8)
     _, _, w, h = img_var.shape
     position = get_image_mask_from_annotation([w, h], position, patch_size)
     position = normalize_array(position)
+
+    # position = normalize_array(cnn_mask)
     return cnn_mask,position
 
 
@@ -365,6 +365,8 @@ def process_and_visualize_mask(mask):
 
 def save_rgb_image(array, filename):
     # The input is expected to be in the range [0, 1], so we scale it to [0, 255]
+    if np.max(array)<1.1:
+        array = 255*array
     array = array.astype('uint8')
     cv2.imwrite(filename, cv2.cvtColor(array, cv2.COLOR_RGB2BGR))  # OpenCV uses BGR format
 
@@ -379,20 +381,21 @@ def calculate_normalized_iou(mask1, mask2):
     # Calculate intersection and union
     mask1 = binarize_array(mask1,0.5)
     mask2 = binarize_array(mask2, 0.5)
+    #
     # f,a = plt.subplots(1,2)
-    # a[0].imshow(binary_mask1)
-    # a[1].imshow(binary_mask2)
+    # a[0].imshow(~mask1)
+    # a[1].imshow(~mask2)
     # plt.show()
 
-    # Calculate IoU for each class
-    iou_foreground = np.sum(np.logical_and(mask1, mask2)) / np.sum(np.logical_or(mask1, mask2))
-    iou_background = np.sum(np.logical_and(~mask1, ~mask2)) / np.sum(np.logical_or(~mask1, ~mask2))
+    # Calculate Intersection and Union
+    intersection = np.logical_and(mask1, mask2).sum()
+    union = np.logical_or(mask1, mask2).sum()
 
-    # Average IoU
-    average_iou = (iou_foreground + iou_background) / 2
+    # Calculate IoU
+    iou = intersection / union if union != 0 else 1.0  # Avoid division by zero
 
-    return iou_foreground,average_iou
-
+    return iou
+    # return average_iou
 def resize_binary_mask(binary_mask, target_shape):
     # Calculate scaling factors for resizing
     scale_factors = (np.array(target_shape) / np.array(binary_mask.shape)).tolist()
@@ -405,119 +408,54 @@ def resize_binary_mask(binary_mask, target_shape):
     resized_mask[resized_mask < 0.5] = 0
 
     return resized_mask
-# ------ arguments handling -------
-parser = argparse.ArgumentParser()
-parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
-parser.add_argument('--pack_size', type=int, default=4, help='size of deep a image training patches')
-parser.add_argument('--img_height', type=int, default=32, help='size of image height')
-parser.add_argument('--img_width', type=int, default=32, help='size of image width')
-parser.add_argument('--channel', type=int, default=3, help='number of image channel')
-args = parser.parse_args()
-os.makedirs('./test/', exist_ok=True)
-
-# ------ device handling -------
-cuda = True if torch.cuda.is_available() else False
-torch.cuda.set_device(0)
-if cuda:
-    device = 'cuda'
-else:
-    device = 'cpu'
-# Tensor type
-Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-
-# ------ Configure model -------
-# # Initialize circle generator
-circle_generator = get_circle_Generator()
-circle_generator.to(device)
-# # Initialize position generator
-# position_generator = get_position_Generator()
-# position_generator.to(device)
-generator = get_combined_Generator()
-generator.eval()
-generator.to(device)
-# Initial image inpainter
-inpainter_model_path = '/home/huifang/workspace/code/lama/big-lama'
-train_config_path = inpainter_model_path+'/config.yaml'
-with open(train_config_path, 'r') as f:
-    train_config = OmegaConf.create(yaml.safe_load(f))
-
-train_config.training_model.predict_only = True
-train_config.visualizer.kind = 'noop'
-inpainter = getLamaInpainter(train_config,inpainter_model_path+'/models/best.ckpt', strict=False, map_location='cpu')
-inpainter.freeze()
-inpainter.to(device)
-# ------ main process -------
-# manage input
-patch_size = 32
-transforms_rgb = transforms.Compose([transforms.ToTensor(),
-               transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 
-# test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
-test_image_path = '/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_trainable_fiducial.txt'
-# test_image_path = '/home/huifang/workspace/data/imagelists/st_cytassist.txt'
-
-f = open(test_image_path, 'r')
-files = f.readlines()
-f.close()
-num_files = len(files)
-fiducial_ious=0
-average_ious=0
-cnt=0
-for i in range(0,num_files):
-    print(str(num_files)+'---'+str(i))
-    start_time = time.time()
-    image_name = files[i]
-
-    # image_name = '/media/huifang/data/fiducial/original_data/10x/CytAssist/CytAssist_11mm_FFPE_Human_Colorectal_Cancer_spatial/spatial/cytassist_image.tiff'
-
-    # label_percentage = float(image_name.split(' ')[1])
-    # if label_percentage >0.9:
-    #     continue
-    level = int(image_name.split(' ')[1])
-    # if level ==1:
-    #     continue
-
-    # group = int(image_name.split(' ')[2])
-    # if group!=1:
-    #     continue
-
-    # img_pil= Image.open(image_name.split(' ')[0])
-    # w,h = img_pil.size
-    # left = int(2 * w / 3)
-    # upper = 0
-    # right = w
-    # lower = int(h / 3)
-    # img_pil = img_pil.crop((left, upper, right, lower))
-    # img_pil = img_pil.resize((2080, 2080), Image.ANTIALIAS)
-    #
-    # img_tissue = Image.open(image_name.split(' ')[1].rstrip('\n'))
-    # w, h = img_pil.size
-    # left = int(2*w / 3)
-    # upper = 0
-    # right = w
-    # lower = int(h / 3)
-    # img_tissue = img_tissue.crop((left, upper, right, lower))
-    # # img_tissue = img_tissue.resize((2080, 2080), Image.ANTIALIAS)
-    # img_tissue = np.array(img_tissue)
-    mask_name = image_name.split(' ')[0].split('.')[0] + '_ground_truth.png'
-    mask = plt.imread(mask_name)
+def divide_cytassist_and_process(image_name):
+    """
+    Divide the image into 4 patches, process each patch, and reassemble the image.
+    """
+    img_pil = Image.open(image_name)
+    h, w = img_pil.size
+    h_new = find_nearest_multiple_of_64(h)
+    w_new = find_nearest_multiple_of_64(w)
+    img_pil = img_pil.resize((h_new, w_new), Image.ANTIALIAS)
+    img_np = np.array(img_pil)
 
 
-    img_var,img_np = get_image_var(image_name)
-    # img_var = img_var[:,:,:2048,:2048]
-    # img_np = img_np[:2048,:2048,:]
+    img_var = transforms_rgb(img_pil)
+    img_var = torch.unsqueeze(img_var, dim=0).to(device)
+    mid_h, mid_w = h_new // 2, w_new // 2
+    # Divide the image into 4 patches
+    var_patches = [img_var[:,:,:mid_h, :mid_w], img_var[:,:,:mid_h, mid_w:],
+               img_var[:,:,mid_h:, :mid_w], img_var[:,:,mid_h:, mid_w:]]
+    np_patches=[img_np[:mid_h, :mid_w,:],img_np[:mid_h, mid_w:,:],
+                img_np[mid_h:, :mid_w,:], img_np[mid_h:, mid_w:,:]]
+
+    # Process each patch and store the 5 results
+    results = [run(var_patch,np_patch) for var_patch,np_patch in zip(var_patches,np_patches)]
+
+    # Stack results of the same type from each patch
+    final_results = []
+    for i in range(5):
+        # Extract the i-th result from each patch's results
+        combined_patches = [result[i] for result in results]
+
+        # Combine the patches for this particular result
+        top_combined = np.hstack((combined_patches[0], combined_patches[1]))
+        bottom_combined = np.hstack((combined_patches[2], combined_patches[3]))
+        combined_image = np.vstack((top_combined, bottom_combined))
+
+        final_results.append(combined_image)
+    return img_np,final_results
+
+
+def run(image_var,image_np,recovery=True):
 
     # cnn_mask = morphological_closing(get_binary_mask(get_cnn_mask(img_var)))
     # single_cnn_mask = get_cnn_mask(img_var,circle_generator)
     # position = get_position_mask(img_var,use_gaussian=True)
-    cnn_mask, position = get_circle_and_position_mask(img_var,generator,use_gaussian=True)
-    # cnn_mask_acc = np.resize(cnn_mask, mask.shape)
-    cnn_mask_acc = resize_binary_mask(cnn_mask, mask.shape)
-    fiducial_iou,average_iou = calculate_normalized_iou(mask,cnn_mask_acc)
-    fiducial_ious+=fiducial_iou
-    average_ious+=average_iou
-    cnt+=1
+
+    cnn_mask, position = get_circle_and_position_mask(image_var,generator,use_gaussian=True)
 
 
     # position = binarize_array(position,0.6)
@@ -543,73 +481,205 @@ for i in range(0,num_files):
     # plt.show()
     # cnn_mask = cnn_mask_circle_figure
 
+    if recovery:
+        inpainter_image = np.transpose(image_np,(2,0,1))
+        inpainter_image = inpainter_image.astype('float32')/255
+        cnn_position_output = get_inpainting_result(inpainter_image,cnn_position_mask)
 
-    inpainter_image = np.transpose(img_np,(2,0,1))
-    inpainter_image = inpainter_image.astype('float32')/255
-    cnn_position_output = get_inpainting_result(inpainter_image,cnn_position_mask)
+
+        single_cnn_output = get_inpainting_result(inpainter_image,cnn_mask)
+        # single_cnn_mask = get_binary_mask(cnn_mask_circle_figure)
+        # direct_output = get_inpainting_result(inpainter_image,single_cnn_mask)
+        return cnn_mask, position, cnn_position_mask, cnn_position_output, single_cnn_output
+    else:
+        return cnn_mask, position, cnn_position_mask
+
+def plot_circles_in_image(image,circles,width):
+    img_cp = image.copy()
+    for circle in circles:
+        cv2.circle(img_cp, (circle[0],circle[1]), circle[2],[255,0,0], width)
+
+    return img_cp
+
+# ------ arguments handling -------
+parser = argparse.ArgumentParser()
+parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
+parser.add_argument('--pack_size', type=int, default=4, help='size of deep a image training patches')
+parser.add_argument('--img_height', type=int, default=32, help='size of image height')
+parser.add_argument('--img_width', type=int, default=32, help='size of image width')
+parser.add_argument('--channel', type=int, default=3, help='number of image channel')
+args = parser.parse_args()
+os.makedirs('./test/', exist_ok=True)
+
+# ------ device handling -------
+cuda = True if torch.cuda.is_available() else False
+torch.cuda.set_device(0)
+if cuda:
+    device = 'cuda'
+else:
+    device = 'cpu'
+# Tensor type
+Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+
+# ------ Configure model -------
+# # Initialize circle generator
+# circle_generator = get_circle_Generator()
+# circle_generator.to(device)
+# # Initialize position generator
+# position_generator = get_position_Generator()
+# position_generator.to(device)
+generator = get_combined_Generator()
+generator.eval()
+generator.to(device)
+# Initial image inpainter
+inpainter_model_path = '/home/huifang/workspace/code/lama/big-lama'
+train_config_path = inpainter_model_path+'/config.yaml'
+with open(train_config_path, 'r') as f:
+    train_config = OmegaConf.create(yaml.safe_load(f))
+
+train_config.training_model.predict_only = True
+train_config.visualizer.kind = 'noop'
+inpainter = getLamaInpainter(train_config,inpainter_model_path+'/models/best.ckpt', strict=False, map_location='cpu')
+inpainter.freeze()
+inpainter.to(device)
+# ------ main process -------
+# manage input
+patch_size = 32
+transforms_rgb = transforms.Compose([transforms.ToTensor(),
+               transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 
-    single_cnn_output = get_inpainting_result(inpainter_image,cnn_mask)
-    # single_cnn_mask = get_binary_mask(cnn_mask_circle_figure)
-    # direct_output = get_inpainting_result(inpainter_image,single_cnn_mask)
+# test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+# test_image_path = '/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_trainable_fiducial.txt'
+test_image_path = '/home/huifang/workspace/data/imagelists/st_cytassist.txt'
+# test_image_path='/home/huifang/workspace/data/imagelists/st_auto_trainable_images.txt'
+# test_image_path='/home/huifang/workspace/data/imagelists/st_auto_test_images.txt'
+# test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+#
+f = open(test_image_path, 'r')
+files = f.readlines()
+f.close()
+num_files = len(files)
+fiducial_ious_cnn=0
+fiducial_ious_cnn_position=0
+binary_ious=0
+cnt=0
+Visualization = False
+for i in range(0,num_files):
+    print(str(num_files)+'---'+str(i))
+    start_time = time.time()
+    image_name = files[i]
+
+
+    # image_name = '/media/huifang/data/fiducial/original_data/10x/CytAssist/CytAssist_11mm_FFPE_Human_Colorectal_Cancer_spatial/spatial/cytassist_image.tiff'
+
+    # label_percentage = float(image_name.split(' ')[1])
+    # if label_percentage >0.9:
+    #     continue
+    # level = int(image_name.split(' ')[1])
+    # if level ==1:
+    #     continue
+
+    # group = int(image_name.split(' ')[2])
+    # if group!=1:
+    #     continue
+
+
+
+    # img_pil= Image.open(image_name.split(' ')[0])
+    img_tissue = plt.imread(image_name.split(' ')[1].rstrip('\n'))
+    img_np,[cnn_mask, position, cnn_position_mask, cnn_position_output, single_cnn_output] = divide_cytassist_and_process(image_name.split(' ')[0])
+
+    # circle_gt = plt.imread(image_name.split(' ')[0].split('.')[0] + '_ground_truth.png')
+    # binary_gt = plt.imread(image_name.split('.')[0]+ '_binary_gt.png')
+    # binary_gt = plt.imread(image_name.split('.')[0] + '_binary_patch.png')
+
+    # img_var,img_np = get_image_var(image_name)
+
+    # if not os.path.exists(image_name.split('.')[0] + '_auto.npy'):
+    #     continue
+    # circles = np.load(image_name.split('.')[0] + '_auto.npy')
+    # img_original = plt.imread(image_name.split(' ')[0])
+    # img_auto = plot_circles_in_image(img_original, circles, 2)
+    # auto_mask = generate_mask(img_original.shape[:2], circles, -1)
+
+
+    # cnn_mask,position,cnn_position_mask,cnn_position_output,single_cnn_output = run(img_var,img_np)
+    # cnn_mask, position, cnn_position_mask = run(img_var, img_np,recovery=False)
+
+    image_original = plt.imread(image_name.split(' ')[0])*255
+    image_original = np.asarray(image_original,np.uint8)
+    cnn_mask = cv2.resize(cnn_mask, (image_original.shape[1],image_original.shape[0]), interpolation=cv2.INTER_NEAREST)
+    cnn_mask  = np.asarray(cnn_mask,np.uint8)
+    kernel = np.ones((5, 5), np.uint8)
+    cnn_mask = cv2.erode(cnn_mask, kernel, iterations=1)
+    contours, hierarchy = cv2.findContours(cnn_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(image_original, contours, -1, color=255, thickness=2)
+    save_rgb_image(image_original, './temp_result/method/cytassist/' + str(i) + '.png')
+    # save_rgb_image(image_original, './temp_result/method/our_output_without_spatial/all/' + str(i) + '.png')
+    continue
+
+    # position = plt.imread(image_name.split('.')[0] + '_binary_patch.png')
+    # plt.imshow(binarize_array(position,0.5))
+    # plt.show()
+
+    # test_circle_mask_cnn_position = resize_binary_mask(cnn_position_mask, circle_gt.shape)
+    # test_circle_mask_cnn= resize_binary_mask(cnn_mask, circle_gt.shape)
+    # test_binary_mask = resize_binary_mask(position,binary_gt.shape)
+    #
+    # fiducial_iou_cnn = calculate_normalized_iou(circle_gt,test_circle_mask_cnn)
+    # fiducial_ious_cnn += fiducial_iou_cnn
+    # fiducial_iou_cnn_position = calculate_normalized_iou(circle_gt, test_circle_mask_cnn_position)
+    # fiducial_ious_cnn_position += fiducial_iou_cnn_position
+    # binary_iou = calculate_normalized_iou(binary_gt,test_binary_mask)
+    # binary_ious+=binary_iou
+    # print(fiducial_iou_cnn)
+    # cnt+=1
 
     end_time = time.time()
-    print(end_time-start_time)
-    # single_cnn_output = get_inpainting_result(single_cnn_mask)
-    # cnn_output = get_inpainting_result(cnn_mask)
-    # save_rgb_image(direct_output,'./temp_result/circle/'+str(i)+'.png')
-    # save_rgb_image(cnn_position_output, './temp_result/network/' + str(i) + '.png')
+    # save_gray_image(cnn_mask,'./temp_result/method/attn_net_output/train/'+str(i)+'.png')
+    # save_rgb_image(single_cnn_output,'./temp_result/method/attn_net_output/train/'+str(i)+'.png')
+    # # save_rgb_image(cnn_position_output, './temp_result/cnn_mul_position/' + str(i) + '.png')
     # continue
+    if Visualization:
+        f,a = plt.subplots(2,4,figsize=(20, 10))
+        a[0,0].imshow(img_np)
+        a[0,1].imshow(img_tissue)
+        # a[0,1].imshow(1-circle_gt,cmap='binary',alpha=0.6)
+        # a[0,1].imshow(img_auto)
+        # a[0,1].imshow(1 - auto_mask, cmap='binary', alpha=0.6)
+        # a[0,1].imshow(1-circle_gt,cmap='gray')
+        a[0,2].imshow(img_np)
+        a[0,2].imshow(1-cnn_mask,cmap='binary',alpha=0.6)
+        a[0,3].imshow(img_np)
+        a[0,3].imshow(1-position,cmap='binary',alpha=0.6)
+        # a[1,0].imshow(masked_img)
+        # bool_mask = cnn_position_mask.astype(bool)
+        # Create an overlay with green color where the mask is True
+        # overlay = np.zeros_like(img_np)
+        # overlay[bool_mask] = [0, 255, 0]  # Green color
+        # Combine the original image and the overlay
+        # alpha = 0.5  # Adjust alpha to control the transparency of the overlay
+        # output = cv2.addWeighted(img_np, 1, overlay, alpha, 0)
 
-    #
-    #
-    # f,a = plt.subplots(2,4,figsize=(20, 10))
-    # a[0,0].imshow(img_np)
-    # # a[0,1].imshow(img_tissue)
-    # a[0,1].imshow(1-mask,cmap='gray')
-    # a[0,2].imshow(img_np)
-    # a[0,2].imshow(1-cnn_mask,cmap='binary',alpha=0.6)
-    # a[0,3].imshow(img_np)
-    # a[0,3].imshow(1-position,cmap='binary',alpha=0.6)
-    #
-    # #
-    # # square = np.array([
-    # #     [cx - s / 2, cy - s / 2],
-    # #     [cx + s / 2, cy - s / 2],
-    # #     [cx + s / 2, cy + s / 2],
-    # #     [cx - s / 2, cy + s / 2]
-    # # ])
-    # # a[0, 3].plot([square[0][1], square[1][1], square[2][1], square[3][1], square[0][1]],[square[0][0], square[1][0], square[2][0], square[3][0], square[0][0]], 'r-')
-    # # a[1,0].imshow(masked_img)
-    # # bool_mask = cnn_position_mask.astype(bool)
-    # # Create an overlay with green color where the mask is True
-    # # overlay = np.zeros_like(img_np)
-    # # overlay[bool_mask] = [0, 255, 0]  # Green color
-    # # Combine the original image and the overlay
-    # # alpha = 0.5  # Adjust alpha to control the transparency of the overlay
-    # # output = cv2.addWeighted(img_np, 1, overlay, alpha, 0)
-    # # a[0,3].imshow(1-cnn_position_mask,cmap='gray')
-    # # a[1, 0].imshow(img_np)
-    # # a[1, 0].imshow(1-single_cnn_mask, cmap='binary',alpha=0.5)
-    # a[1, 0].imshow(1 - cnn_position_mask, cmap='gray')
-    # a[1, 1].imshow(cnn_position_output)
-    # # a[1,1].imshow(img_np)
-    # a[1, 2].imshow(1 - cnn_mask, cmap='gray')
-    # a[1,3].imshow(single_cnn_output)
-    #
-    # # a[1,3].imshow(direct_output)
-    # # a[1,1].plot(cnn_central_square[[0, 1, 2, 3, 0], 0], cnn_central_square[[0, 1, 2, 3, 0], 1], c='red')
-    #
-    # # a[1,2].imshow(masked_img_circles_figure)
-    # # a[1, 2].plot(masked_img_central_square[[0, 1, 2, 3, 0], 0], masked_img_central_square[[0, 1, 2, 3, 0], 1], c='red')
-    # plt.show()
-    save_rgb_image(single_cnn_output,'./temp_result/circle/'+str(i)+'.png')
-    # save_rgb_image(direct_output[::-1,:,:], './temp_result/cytassist/' + str(i) + '.png')
-    # test = input()
+        # a[1, 2].imshow(cnn_mask, cmap='binary')
+        # a[1,3].imshow(single_cnn_output)
+        #
+        # a[1, 0].imshow(cnn_position_mask, cmap='binary')
+        # a[1, 1].imshow(cnn_position_output)
+
+        plt.show()
+
+    # save_rgb_image(img_np,'./temp_result/method/cytassist/'+str(i)+'_with_fiducial.png')
+    # save_rgb_image(single_cnn_output, './temp_result/method/cytassist/' + str(i) + '_without_fiducial.png')
+    # save_rgb_image(img_tissue, './temp_result/method/cytassist/' + str(i) + '_tissue.png')
 
 
-print('over all test iou:')
-print(fiducial_ious/cnt)
-print(average_ious/cnt)
+print('cnn iou:')
+print(fiducial_ious_cnn/cnt)
+print('cnn_position iou:')
+print(fiducial_ious_cnn_position/cnt)
+print('binary iou:')
+print(binary_ious/cnt)
 
 print('current data set done')

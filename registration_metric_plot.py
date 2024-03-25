@@ -2,9 +2,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Sample data: replace these with your actual results
-metrics_algorithm1 = {'SSIM': 0.61, 'Mutual Information': 0.55}
-metrics_algorithm2 = {'SSIM': 0.68, 'Mutual Information': 0.59}
-
+metrics_algorithm1 = {'SSIM': 0.63, 'Mutual Information': 0.60}
+metrics_algorithm2 = {'SSIM': 0.66, 'Mutual Information': 0.68}
+# metrics_algorithm1 = {'mean IOU': 0.85, 'mean DSC': 0.90}
+# metrics_algorithm2 = {'mean IOU': 0.94, 'mean DSC': 0.97}
 
 # Names of the metrics
 metric_names = list(metrics_algorithm1.keys())
