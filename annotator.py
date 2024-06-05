@@ -175,6 +175,11 @@ def run_hough(image, imagepath, aligned_path,shrink):
         crop_size = 2 * he_radius
         print(he_radius)
         f_indices = np.arange(transposed_fiducial.shape[0])
+        circles = transposed_fiducial
+        np.save(imagepath.split('.')[0] + '_10x.npy',circles)
+        # mask = generate_mask(image.shape[:2], circles, -1)
+        # save_image(mask, imagepath.split('.')[0] + '_10x.png', format="L")
+        return [],[],[]
     else:
         print('Using mouse fiducials.')
         he_radius = he_radius_base
@@ -208,10 +213,10 @@ def run_hough(image, imagepath, aligned_path,shrink):
         f_indices = np.arange(c_indices.shape[0])
     DEBUG=True
     if DEBUG:
-        # output = image.copy()
-        # for i in range(circles.shape[0]):
-        #     cv2.circle(output, (circles[i, 0], circles[i, 1]), circles[i, 2], (0, 255, 0), 2)
-        # plt.imshow(output)
+        output = image.copy()
+        for i in range(circles.shape[0]):
+            cv2.circle(output, (circles[i, 0], circles[i, 1]), circles[i, 2], (0, 255, 0), 2)
+        plt.imshow(output)
         # f, axarr = plt.subplots(1, 3)
         # plt.setp(axarr, xticks=[], yticks=[])
         # axarr[0].imshow(image)
@@ -220,24 +225,24 @@ def run_hough(image, imagepath, aligned_path,shrink):
         # axarr[2].scatter(circles[:, 0], circles[:, 1], marker='.', color="red", s=1)
         plt.show()
 
-        f2, axarr2 = plt.subplots(2,2,figsize=(30,15))
-        plt.setp(axarr2, xticks=[], yticks=[])
-        axarr2[0,0].scatter(circles_copy[:, 0], circles_copy[:, 1])
-        axarr2[0,0].scatter(circles_f_[:, 0], circles_f_[:, 1])
-        axarr2[0,0].axis('equal')
-
-        axarr2[0, 1].scatter(circles[:, 0], circles[:, 1])
-        axarr2[0, 1].scatter(circles_f_copy[:, 0], circles_f_copy[:, 1])
-        axarr2[0, 1].axis('equal')
-
-        axarr2[1,0].scatter(circles[:, 0], circles[:, 1])
-        axarr2[1,0].scatter(transposed_fiducial[:, 0], transposed_fiducial[:, 1])
-        axarr2[1,0].axis('equal')
-        output_fiducial = image.copy()
-        for i in range(transposed_fiducial.shape[0]):
-            cv2.circle(output_fiducial, (transposed_fiducial[i, 0], transposed_fiducial[i, 1]), round(fiducial_radius_base), (0, 255, 0), 2)
-        axarr2[1,1].imshow(output_fiducial)
-        plt.show()
+        # f2, axarr2 = plt.subplots(2,2,figsize=(30,15))
+        # plt.setp(axarr2, xticks=[], yticks=[])
+        # axarr2[0,0].scatter(circles_copy[:, 0], circles_copy[:, 1])
+        # axarr2[0,0].scatter(circles_f_[:, 0], circles_f_[:, 1])
+        # axarr2[0,0].axis('equal')
+        #
+        # axarr2[0, 1].scatter(circles[:, 0], circles[:, 1])
+        # axarr2[0, 1].scatter(circles_f_copy[:, 0], circles_f_copy[:, 1])
+        # axarr2[0, 1].axis('equal')
+        #
+        # axarr2[1,0].scatter(circles[:, 0], circles[:, 1])
+        # axarr2[1,0].scatter(transposed_fiducial[:, 0], transposed_fiducial[:, 1])
+        # axarr2[1,0].axis('equal')
+        # output_fiducial = image.copy()
+        # for i in range(transposed_fiducial.shape[0]):
+        #     cv2.circle(output_fiducial, (transposed_fiducial[i, 0], transposed_fiducial[i, 1]), round(fiducial_radius_base), (0, 255, 0), 2)
+        # axarr2[1,1].imshow(output_fiducial)
+        # plt.show()
     # -------------------------------------------------------
     #         begin annotation
     # -------------------------------------------------------
@@ -298,7 +303,7 @@ def run(imagepath,aligned_path,save_file=True,shrink=0.0):
     # easy_circles, manual_positions, he_radius = run_self(imagepath)
     easy_circles, manual_positions, he_radius = run_hough(image, imagepath, aligned_path,shrink)
     # print(str(len(easy_circles))+' auto detected circles, '+str(len(manual_positions)) + ' need manual annotation.')
-
+    return
     #easy circles visuailization
     image_show = image.copy()
     for circle in easy_circles:
@@ -330,7 +335,8 @@ def run(imagepath,aligned_path,save_file=True,shrink=0.0):
 # ------------------------------------------
 #                load imagelist
 # ------------------------------------------
-f_image = open('/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_no_aligned_fiducial.txt')
+# f_image = open('/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_no_aligned_fiducial.txt')
+f_image = open('/home/huifang/workspace/data/imagelists/st_image_with_aligned_fiducial.txt')
 image_list = f_image.readlines()
 #19 20 24 44 48 49 50 51 super hard
 
@@ -343,7 +349,6 @@ for i in range(0,len(image_list)):
         run(image[0][:-1],[], save_file=False,shrink=1.825)
 
     else:
-
     # try:
         run(image[0],image[1][:-1],save_file=False)
 

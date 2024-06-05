@@ -1,23 +1,99 @@
 import argparse
 import statistics
-import time
 from omegaconf import OmegaConf
 import yaml
 from scipy.ndimage import zoom
-from skimage.morphology import skeletonize
-import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import minimize
 from scipy.ndimage import map_coordinates
 from cnn_io import *
 from hough_utils import *
 from scipy.spatial.transform import Rotation as R
+from scipy import ndimage
+from backgroundremover.bg import remove
 import numpy as np
-import fiducial_utils
-from multiprocessing import Pool, cpu_count
-import scipy.ndimage as ndi
-import matplotlib.patches as patches
-from concurrent.futures import ThreadPoolExecutor
+import matplotlib.pyplot as plt
+from scipy.ndimage import label, find_objects
+from skimage.color import label2rgb
+from skimage.transform import resize
+from PIL import Image
+
+def remove_bg(src_img):
+    model_choices = ["u2net", "u2net_human_seg", "u2netp"]
+    img,mask = remove(src_img, model_name=model_choices[2],
+                 alpha_matting=False,
+                 alpha_matting_foreground_threshold=240,
+                 alpha_matting_background_threshold=10,
+                 alpha_matting_erode_structure_size=10,
+                 alpha_matting_base_size=1000)
+    return img
+
+def get_rgb_img(rgba_image):
+
+    # Create a new background image (white) with the same size as the RGBA image
+    background = Image.new('RGBA', rgba_image.size, (255, 255, 255, 255))  # RGBA with white background
+
+    # Blend the RGBA image with the white background
+    blended_image = Image.alpha_composite(background, rgba_image).convert('RGB')
+
+    # Convert the blended RGB image to a NumPy array
+    rgb_array = np.array(blended_image)
+    return rgb_array
+
+def segregate(img):
+    rgb_image = get_rgb_img(img)
+    img = np.asarray(img)
+    binary_mask = img[:, :, 3].copy()
+    # plt.imshow(binary_mask)
+    # plt.show()
+    # binary_mask[img[:, :, 3] > 50] = 1
+    # binary_mask[img[:, :, 3] < 50] = 0
+    # threshold_value = np.percentile(binary_mask, 95)
+    # print(threshold_value)
+    # test = input()
+
+    # Apply thresholding to create a binary mask
+    _, binary_mask = cv2.threshold(binary_mask, 5, 255, cv2.THRESH_BINARY)
+    # plt.imshow(binary_mask)
+    # plt.show()
+
+
+
+    binary_mask = resize(binary_mask, rgb_image.shape[:2], order=0, preserve_range=True, anti_aliasing=False).astype(
+        np.uint8)
+    # plt.imshow(binary_mask)
+    # plt.show()
+
+    # Find connected components
+    labeled_mask, num_features = label(binary_mask)
+    # print(f"Number of disconnected components: {num_features}")
+    size_threshold = 2000  # Adjust this threshold based on your requirements
+
+    # Find slices for each connected component
+    object_slices = find_objects(labeled_mask)
+
+    # Create a mask to keep track of the components to remove
+    mask_to_remove = np.zeros_like(labeled_mask, dtype=bool)
+
+    for i, slice_tuple in enumerate(object_slices):
+        if slice_tuple is not None:
+            # Calculate the size of the component
+            component_size = np.sum(labeled_mask[slice_tuple] == (i + 1))
+
+            # Mark small components for removal
+            if component_size < size_threshold:
+                mask_to_remove[slice_tuple] |= (labeled_mask[slice_tuple] == (i + 1))
+
+    # Remove small components by setting them to background (0)
+    labeled_mask[mask_to_remove] = 0
+
+    # Re-label the connected components
+    labeled_mask, num_features = label(labeled_mask > 0)
+    # print(f"Number of disconnected components: {num_features}")
+
+    # Overlay labeled mask on RGB image
+    overlay = label2rgb(labeled_mask, image=rgb_image, bg_label=0, alpha=0.5, kind='overlay')
+    return overlay,num_features
 
 def get_image_mask_from_annotation(image_size,annotation,step):
     image_mask = np.zeros(image_size)
@@ -70,6 +146,21 @@ def refine_frame_mask(mask, kernel_size=1):
 
     return refined_mask
 
+def remove_small_objs(mask,size_threshold):
+    # Label connected components
+    label_im, nb_labels = ndimage.label(mask)
+
+    # Find the sizes of the connected components
+    sizes = ndimage.sum(mask, label_im, range(nb_labels + 1))
+    # Create a mask to remove small components
+    mask_size = sizes < size_threshold
+    remove_pixel = mask_size[label_im]
+    label_im[remove_pixel] = 0
+
+    # The final mask without small noisy components
+    mask_cleaned = label_im > 0
+    return mask_cleaned
+
 def binarize_array(array, threshold):
     """
     Binarizes a numpy array based on a threshold determined by the given percentile.
@@ -118,7 +209,7 @@ def get_position_mask(img_var,position_generator, use_gaussian=True):
     return position.astype(np.float32)
 
 def get_circle_and_position_mask(img_var,generator,use_gaussian=True):
-    cnn_mask_var, position_var = generator(img_var)
+    cnn_mask_var, position_var,attn_var = generator(img_var)
     # cnn_mask_var = generator(img_var)
     cnn_mask = cnn_mask_var.cpu().detach().numpy().squeeze()
     cnn_mask = np.transpose(cnn_mask, (0, 1))
@@ -486,7 +577,6 @@ def run(image_var,image_np,recovery=True):
         inpainter_image = inpainter_image.astype('float32')/255
         cnn_position_output = get_inpainting_result(inpainter_image,cnn_position_mask)
 
-
         single_cnn_output = get_inpainting_result(inpainter_image,cnn_mask)
         # single_cnn_mask = get_binary_mask(cnn_mask_circle_figure)
         # direct_output = get_inpainting_result(inpainter_image,single_cnn_mask)
@@ -551,10 +641,11 @@ transforms_rgb = transforms.Compose([transforms.ToTensor(),
 
 # test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
 # test_image_path = '/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_trainable_fiducial.txt'
-test_image_path = '/home/huifang/workspace/data/imagelists/st_cytassist.txt'
+# test_image_path = '/home/huifang/workspace/data/imagelists/st_cytassist.txt'
 # test_image_path='/home/huifang/workspace/data/imagelists/st_auto_trainable_images.txt'
 # test_image_path='/home/huifang/workspace/data/imagelists/st_auto_test_images.txt'
-# test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+# test_image_path='/home/huifang/workspace/data/imagelists/st_image_with_aligned_fiducial.txt'
 #
 f = open(test_image_path, 'r')
 files = f.readlines()
@@ -564,15 +655,14 @@ fiducial_ious_cnn=0
 fiducial_ious_cnn_position=0
 binary_ious=0
 cnt=0
-Visualization = False
-for i in range(0,num_files):
+Visualization = True
+for i in range(0,72):
     print(str(num_files)+'---'+str(i))
     start_time = time.time()
     image_name = files[i]
 
-
-    # image_name = '/media/huifang/data/fiducial/original_data/10x/CytAssist/CytAssist_11mm_FFPE_Human_Colorectal_Cancer_spatial/spatial/cytassist_image.tiff'
-
+    # directory, _ = os.path.split(image_name.split(' ')[0])
+    # aligned_path = directory+'/aligned_fiducials.jpg'
     # label_percentage = float(image_name.split(' ')[1])
     # if label_percentage >0.9:
     #     continue
@@ -583,58 +673,113 @@ for i in range(0,num_files):
     # group = int(image_name.split(' ')[2])
     # if group!=1:
     #     continue
-
-
-
     # img_pil= Image.open(image_name.split(' ')[0])
-    img_tissue = plt.imread(image_name.split(' ')[1].rstrip('\n'))
-    img_np,[cnn_mask, position, cnn_position_mask, cnn_position_output, single_cnn_output] = divide_cytassist_and_process(image_name.split(' ')[0])
+    # img_tissue = plt.imread(image_name.split(' ')[1].rstrip('\n'))
+    # img_np,[cnn_mask, position, cnn_position_mask, cnn_position_output, single_cnn_output] = divide_cytassist_and_process(image_name.split(' ')[0])
 
+    # if not os.path.exists(image_name.split(' ')[0].split('.')[0] + '_10x.png'):
+    #     continue
+    # mask_10x = plt.imread(image_name.split(' ')[0].split('.')[0] + '_10x.png')
     # circle_gt = plt.imread(image_name.split(' ')[0].split('.')[0] + '_ground_truth.png')
+
+
+    img_var,img_np = get_image_var(image_name.split(' ')[0])
+
+    # mask_10x = resize_binary_mask(mask_10x, circle_gt.shape[:2])
     # binary_gt = plt.imread(image_name.split('.')[0]+ '_binary_gt.png')
     # binary_gt = plt.imread(image_name.split('.')[0] + '_binary_patch.png')
+    # inpainter_image = np.transpose(img_np, (2, 0, 1))
+    # inpainter_image = inpainter_image.astype('float32') / 255
+    # output_10x = get_inpainting_result(inpainter_image, mask_10x)
+    # plt.imshow(output_10x)
+    # plt.show()
 
-    # img_var,img_np = get_image_var(image_name)
+    # aligned_image = plt.imread(aligned_path)
+    # save_rgb_image(output_10x, './10x_result/recovery/' + str(i) + '.png')
+    # save_rgb_image(aligned_image, './10x_result/alignment/' + str(i) + '.png')
+    # continue
+    # f,a = plt.subplots(1,3)
+    # aligned_image = plt.imread(image_name.split(' ')[1].rstrip('\n'))
+    # a[0].imshow(aligned_image)
+    # a[1].imshow(img_np)
+    # a[1].imshow(1-mask_10x,cmap='binary',alpha=0.6)
+    # a[2].imshow(output_10x)
+    #
+    # plt.show()
+    # test = input()
 
     # if not os.path.exists(image_name.split('.')[0] + '_auto.npy'):
     #     continue
-    # circles = np.load(image_name.split('.')[0] + '_auto.npy')
-    # img_original = plt.imread(image_name.split(' ')[0])
+    # circles = np.load(image_name.split('.')[0] + '_10x.npy')
+    # image_original = plt.imread(image_name.split(' ')[0])
     # img_auto = plot_circles_in_image(img_original, circles, 2)
-    # auto_mask = generate_mask(img_original.shape[:2], circles, -1)
 
 
     # cnn_mask,position,cnn_position_mask,cnn_position_output,single_cnn_output = run(img_var,img_np)
-    # cnn_mask, position, cnn_position_mask = run(img_var, img_np,recovery=False)
 
+    cleaned_img = remove_bg(img_np)
+    fragments,num_tissue = segregate(cleaned_img)
+    cleaned_img.save('./temp_result/application/bgrm/' + str(i) + 'original2.png')
+    save_rgb_image(fragments, './temp_result/application/fragments/' + str(i) + '_'+str(num_tissue)+'original2.png')
+
+    continue
+    # # cnn_mask, position, cnn_position_mask = run(img_var, img_np,recovery=False)
+    #
     image_original = plt.imread(image_name.split(' ')[0])*255
     image_original = np.asarray(image_original,np.uint8)
-    cnn_mask = cv2.resize(cnn_mask, (image_original.shape[1],image_original.shape[0]), interpolation=cv2.INTER_NEAREST)
-    cnn_mask  = np.asarray(cnn_mask,np.uint8)
-    kernel = np.ones((5, 5), np.uint8)
-    cnn_mask = cv2.erode(cnn_mask, kernel, iterations=1)
-    contours, hierarchy = cv2.findContours(cnn_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(image_original, contours, -1, color=255, thickness=2)
-    save_rgb_image(image_original, './temp_result/method/cytassist/' + str(i) + '.png')
-    # save_rgb_image(image_original, './temp_result/method/our_output_without_spatial/all/' + str(i) + '.png')
-    continue
+
+    # mask_10x = generate_mask(image_original.shape[:2], circles, -1)
+    # cnn_mask = cv2.resize(cnn_mask, (image_original.shape[1],image_original.shape[0]), interpolation=cv2.INTER_NEAREST)
+    # cnn_mask  = np.asarray(mask_10x,np.uint8)
+
+
+    # cnn_mask = remove_small_objs(cnn_mask, 100)
+    # f,a = plt.subplots(1,2)
+    # a[0].imshow(cnn_mask)
+    # a[1].imshow(cnn_mask_cleaned)
+    # plt.show()
+
+    # mask_bool = cnn_mask.astype(bool)
+    #
+    # # Create an all-zero image with the same shape as the original image
+    # green_mask = np.zeros_like(img_np)
+    #
+    # # Wherever the mask is True, set the color to green
+    # green_mask[mask_bool] = [255, 0, 0]
+    #
+    # # Blend the green mask with the original image
+    # # You can adjust the transparency by changing alpha (0 - transparent, 1 - opaque)
+    # alpha = 0.5
+    # overlay_image = cv2.addWeighted(green_mask, alpha, img_np, 0.5, 0)
+    #
+    # # plt.imshow(overlay_image)
+    # # plt.show()
+    #
+    #
+    # # kernel = np.ones((5, 5), np.uint8)
+    # # cnn_mask = cv2.erode(cnn_mask, kernel, iterations=1)
+    # # contours, hierarchy = cv2.findContours(cnn_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # # cv2.drawContours(image_original, contours, -1, color=255, thickness=2)
+    # save_rgb_image(overlay_image, '/home/huifang/workspace/code/fiducial_remover/10x_result/mask/' + str(i) + '.png')
+    # # save_rgb_image(image_original, './temp_result/method/our_output_without_spatial/all/' + str(i) + '.png')
+    # continue
 
     # position = plt.imread(image_name.split('.')[0] + '_binary_patch.png')
     # plt.imshow(binarize_array(position,0.5))
     # plt.show()
 
     # test_circle_mask_cnn_position = resize_binary_mask(cnn_position_mask, circle_gt.shape)
-    # test_circle_mask_cnn= resize_binary_mask(cnn_mask, circle_gt.shape)
+    cnn_mask= resize_binary_mask(cnn_mask, circle_gt.shape)
     # test_binary_mask = resize_binary_mask(position,binary_gt.shape)
     #
-    # fiducial_iou_cnn = calculate_normalized_iou(circle_gt,test_circle_mask_cnn)
-    # fiducial_ious_cnn += fiducial_iou_cnn
+    fiducial_iou_cnn = calculate_normalized_iou(circle_gt,cnn_mask)
+    fiducial_ious_cnn += fiducial_iou_cnn
     # fiducial_iou_cnn_position = calculate_normalized_iou(circle_gt, test_circle_mask_cnn_position)
     # fiducial_ious_cnn_position += fiducial_iou_cnn_position
     # binary_iou = calculate_normalized_iou(binary_gt,test_binary_mask)
     # binary_ious+=binary_iou
     # print(fiducial_iou_cnn)
-    # cnt+=1
+    cnt+=1
 
     end_time = time.time()
     # save_gray_image(cnn_mask,'./temp_result/method/attn_net_output/train/'+str(i)+'.png')
@@ -642,17 +787,19 @@ for i in range(0,num_files):
     # # save_rgb_image(cnn_position_output, './temp_result/cnn_mul_position/' + str(i) + '.png')
     # continue
     if Visualization:
-        f,a = plt.subplots(2,4,figsize=(20, 10))
-        a[0,0].imshow(img_np)
-        a[0,1].imshow(img_tissue)
-        # a[0,1].imshow(1-circle_gt,cmap='binary',alpha=0.6)
+        f,a = plt.subplots(1,4,figsize=(20, 10))
+        a[0].imshow(img_np)
+        # a[0,1].imshow(img_tissue)
+        # a[1].imshow(img_np)
+        # a[1].imshow(1 - cnn_mask, cmap='binary', alpha=0.6)
         # a[0,1].imshow(img_auto)
         # a[0,1].imshow(1 - auto_mask, cmap='binary', alpha=0.6)
         # a[0,1].imshow(1-circle_gt,cmap='gray')
-        a[0,2].imshow(img_np)
-        a[0,2].imshow(1-cnn_mask,cmap='binary',alpha=0.6)
-        a[0,3].imshow(img_np)
-        a[0,3].imshow(1-position,cmap='binary',alpha=0.6)
+        a[1].imshow(single_cnn_output)
+        # a[0,2].imshow(1-cnn_mask,cmap='binary',alpha=0.6)
+        a[2].imshow(cleaned_img)
+        a[3].imshow(fragments)
+        # a[0,3].imshow(1-position,cmap='binary',alpha=0.6)
         # a[1,0].imshow(masked_img)
         # bool_mask = cnn_position_mask.astype(bool)
         # Create an overlay with green color where the mask is True
@@ -677,9 +824,11 @@ for i in range(0,num_files):
 
 print('cnn iou:')
 print(fiducial_ious_cnn/cnt)
-print('cnn_position iou:')
-print(fiducial_ious_cnn_position/cnt)
-print('binary iou:')
-print(binary_ious/cnt)
-
-print('current data set done')
+print('number of samples:')
+print(cnt)
+# print('cnn_position iou:')
+# print(fiducial_ious_cnn_position/cnt)
+# print('binary iou:')
+# print(binary_ious/cnt)
+#
+# print('current data set done')

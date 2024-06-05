@@ -40,10 +40,10 @@ def get_combined_Generator():
     generator = Rich_Parrel_Attention_Generator()
     # generator.load_state_dict((torch.load(
     #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_annotation_circle_only/g_600.pth')))
-    generator.load_state_dict((torch.load(
-        '/media/huifang/data/experiment/pix2pix/saved_models/auto_circle_binary_spatial_selected_mask_5layer_renewed/g_1600.pth')))
     # generator.load_state_dict((torch.load(
-    #     '/media/huifang/data/experiment/pix2pix/saved_models/ground_truth_circle_only/g_600.pth')))
+    #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_circle_binary_spatial_selected_mask_5layer_renewed/g_1600.pth')))
+    generator.load_state_dict((torch.load(
+        '/media/huifang/data/experiment/pix2pix/saved_models/ground_truth_circle_only/g_600.pth')))
 
     # generator.load_state_dict((torch.load(
     #     '/media/huifang/data/experiment/pix2pix/saved_models/auto_circle_binary_selected_mask_5layer/g_800.pth')))

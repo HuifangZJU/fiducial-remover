@@ -91,7 +91,8 @@ files = f.readlines()
 f.close()
 # for line in files:
 #     img = line.split(' ')[0]
-cleaned_image_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/circle/'
+visualization = True
+cleaned_image_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/application/model_out/recovery/'
 annotation_path = '/home/huifang/workspace/code/fiducial_remover/location_annotation/'
 mask_path1 = '/home/huifang/workspace/code/backgroundremover/bgrm_direct_out/'
 mask_path2 = '/home/huifang/workspace/code/backgroundremover/bgrm_out/'
@@ -99,9 +100,11 @@ iou1=0
 iou2=0
 cnt=0
 for i in range(0,167):
+    # print(cnt)
     # img = image_path+str(i)+'.png'
     # print(files[i])
     # test = input()
+
     level = int(files[i].split(' ')[1])
     if level ==1:
         continue
@@ -116,42 +119,55 @@ for i in range(0,167):
     ground_truth = read_labelme_json(annotation_path+str(i)+'.json',mask1.shape,[h_scale,w_scale])
     if np.max(ground_truth)==0:
         continue
+    print(cnt)
+    # else:
+    #     print(i)
+    #     plt.imshow(image_orig)
+    #     plt.show()
+    #     continue
 
-    iou1 +=dice_coefficient(mask1, ground_truth)
-    iou2 += dice_coefficient(mask2, ground_truth)
+    # iou1 +=dice_coefficient(mask1, ground_truth)
+    # iou2 += dice_coefficient(mask2, ground_truth)
+    iou1 += calculate_iou(mask1, ground_truth)
+    iou2 += calculate_iou(mask2, ground_truth)
+    print(calculate_iou(mask1, ground_truth))
+    print(calculate_iou(mask2, ground_truth))
+    # print(iou1)
+    # print(iou2)
     cnt +=1
+
     #
-    #
-    overlayed_image1 = get_overlayed_image(image_orig,mask1)
-    overlayed_image2 = get_overlayed_image(cleaned_image,mask2)
-    overlayed_image3 = get_overlayed_image(image_orig,ground_truth)
+    if visualization:
+        overlayed_image1 = get_overlayed_image(image_orig,mask1)
+        overlayed_image2 = get_overlayed_image(cleaned_image,mask2)
+        overlayed_image3 = get_overlayed_image(image_orig,ground_truth)
 
-    # Display the original image and the overlayed image
-    plt.figure(figsize=(18, 18))
+        # Display the original image and the overlayed image
+        plt.figure(figsize=(18, 18))
 
-    plt.subplot(2,2, 1)
-    plt.imshow(image_orig)
-    plt.title('Original Image')
-    plt.axis('off')
+        plt.subplot(2,2, 1)
+        plt.imshow(image_orig)
+        plt.title('Original Image')
+        plt.axis('off')
 
-    plt.subplot(2, 2, 2)
-    plt.imshow(overlayed_image3)
-    plt.title('Tissue segmentation ground truth')
-    plt.axis('off')
+        plt.subplot(2, 2, 2)
+        plt.imshow(overlayed_image3)
+        plt.title('Tissue segmentation ground truth')
+        plt.axis('off')
 
-    plt.subplot(2, 2, 3)
-    plt.imshow(overlayed_image1)
-    plt.title('Tissue segmentation with fiducial markers')
-    plt.axis('off')
+        plt.subplot(2, 2, 3)
+        plt.imshow(overlayed_image1)
+        plt.title('Tissue segmentation with fiducial markers')
+        plt.axis('off')
 
 
 
-    plt.subplot(2, 2, 4)
-    plt.imshow(overlayed_image2)
-    plt.title('Tissue segmentation without fiducial markers')
-    plt.axis('off')
+        plt.subplot(2, 2, 4)
+        plt.imshow(overlayed_image2)
+        plt.title('Tissue segmentation without fiducial markers')
+        plt.axis('off')
 
-    plt.show()
+        plt.show()
 
 
     # image = io.imread(img)
@@ -203,3 +219,4 @@ for i in range(0,167):
 
 print(iou1/cnt)
 print(iou2/cnt)
+print(cnt)

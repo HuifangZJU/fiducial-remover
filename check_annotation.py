@@ -143,18 +143,6 @@ def annotate_patches(image_size, patch_size, circles):
                     # print(annotation[i, j])
                     # plt.show()
                     break
-    # # filling holes
-    # # kernel = np.ones((3, 3))
-    # kernel = np.array([[0, 1, 0],
-    #                    [1, 1, 1],
-    #                    [0, 1, 0]])
-    # neighbor_count = convolve2d(annotation, kernel, mode='same')
-    # holes = np.logical_and(annotation == 0, neighbor_count > 2)
-    # while np.sum(holes)>0:
-    #     annotation= np.logical_or(annotation,holes)
-    #     neighbor_count = convolve2d(annotation, kernel, mode='same')
-    #     holes = np.logical_and(annotation == 0, neighbor_count > 2)
-
     return annotation
 
 def get_shape_from_annotation_path(fileid):
@@ -416,8 +404,8 @@ fiducial_images = f.readlines()
 SAVE_FILE = False
 if SAVE_FILE:
     # imagelist_path = '/home/huifang/workspace/data/imagelists/st_upsample_trainable_images_final_with_location_frame.txt'
-    dest_train_images = '/home/huifang/workspace/data/imagelists/st_shape_regulated_trainable_images.txt'
-    dest_test_images = '/home/huifang/workspace/data/imagelists/st_shape_regulated_test_images.txt'
+    dest_train_images = '/home/huifang/workspace/data/imagelists/st_cellpose_trainable_images.txt'
+    dest_test_images = '/home/huifang/workspace/data/imagelists/st_cellpose_test_images.txt'
     f_list_train = open(dest_train_images,'w')
     f_list_test = open(dest_test_images,'w')
 
@@ -425,7 +413,8 @@ width = 2
 patch_size = 32
 auto_cnt=0
 # auto_good_shape_id = [5,13,16,20,21,34,35,39,40,45,47,54,59,60,63,107,120]
-shape_regulated_bad_shape_id=[45,67,68,69,70,84,92,94,97,100,102,108,111,112,116,121,126,127,128,130,132,133,135,144,146,160,166]
+cellpose_good_shape_id=[4, 5, 14, 15, 21, 34, 39, 56, 59, 60, 63, 66,93, 106,108,129,130]
+# shape_regulated_bad_shape_id=[45,67,68,69,70,84,92,94,97,100,102,108,111,112,116,121,126,127,128,130,132,133,135,144,146,160,166]
 for i in range(0,len(fiducial_images)):
 
     # if i in badfile:
@@ -438,12 +427,10 @@ for i in range(0,len(fiducial_images)):
     # f_temp.write(image_name)
 
     print(str(len(fiducial_images))+'---'+str(i))
-    image = plt.imread(image_name)
-
-    if not os.path.exists(image_name.split('.')[0]+ '_auto.npy'):
-        continue
-    # if not os.path.exists(image_name.split('.')[0]+ '_shape_constrained.png'):
+    # if not os.path.exists(image_name.split('.')[0]+ '_auto.npy'):
+    #     f_list_test.write(fiducial_images[i])
     #     continue
+        # continue
     # auto = plt.imread(image_name.split('.')[0]+ '_auto.png')
     # shape_regulated = plt.imread(image_name.split('.')[0]+ '_shape_constrained.png')
     # f,a = plt.subplots(1,2)
@@ -451,7 +438,7 @@ for i in range(0,len(fiducial_images)):
     # a[1].imshow(shape_regulated)
     # plt.show()
     # continue
-
+    image = plt.imread(image_name)
 
     # print(image_name)
     # annotation_image = get_position_mask(image.shape[:2], i)
@@ -462,7 +449,7 @@ for i in range(0,len(fiducial_images)):
     #
     # continue
 
-    circles = np.load(image_name.split('.')[0] + '_auto.npy')
+    circles = np.load(image_name.split('.')[0] + '.npy')
     # circles = run_circle_threhold(image, 8, circle_threshold=30, step=5)
     # if circles.shape[0] ==0:
     #     # f_list_test.write(fiducial_images[i])
@@ -485,10 +472,10 @@ for i in range(0,len(fiducial_images)):
     # np.save(image_name.split('.')[0] + '_shape_regulated.npy', in_place_circles)
     # continue
 
-    # if i in shape_regulated_bad_shape_id:
-    #     f_list_train.write(fiducial_images[i].rstrip('\n') + ' 0'+'\n')
-    # else:
+    # if i in cellpose_good_shape_id:
     #     f_list_train.write(fiducial_images[i].rstrip('\n') + ' 1'+'\n')
+    # else:
+    #     f_list_train.write(fiducial_images[i].rstrip('\n') + ' 0'+'\n')
     # continue
     # in_tissue_circles, out_tissue_circles, hard_circles, circles = get_circles_from_file(image_name)
     #
@@ -515,7 +502,22 @@ for i in range(0,len(fiducial_images)):
 
 
     mask = generate_mask(image.shape[:2], circles, -1)
+    mask_bool = mask.astype(bool)
+
+    # Create an all-zero image with the same shape as the original image
+    green_mask = np.zeros_like(image)
+
+    # Wherever the mask is True, set the color to green
+    green_mask[mask_bool] = [255, 0, 0]
+
+    # Blend the green mask with the original image
+    # You can adjust the transparency by changing alpha (0 - transparent, 1 - opaque)
+    alpha = 0.5
+    overlay_image = cv2.addWeighted(green_mask, alpha, image, 0.5, 0)
+    plt.imshow(overlay_image)
+    plt.show()
     # sum = np.sum(mask)
+
     # print(sum/(mask.shape[0]*mask.shape[1]))
     # test = input()
     # mask = generate_weighted_mask(image.shape[:2], in_tissue_circles,out_tissue_circles,2)
@@ -523,8 +525,8 @@ for i in range(0,len(fiducial_images)):
     # plt.imshow(1-mask,cmap='binary',alpha=0.6)
     # plt.show()
 
-    save_image(mask, image_name.split('.')[0]+ '_auto_tight.png', format="L")
-    continue
+    # save_image(mask, image_name.split('.')[0]+ '_auto_tight.png', format="L")
+    # continue
 
     # Visualization
     # annotation_image = get_position_mask(image.shape[:2], i)
@@ -534,27 +536,27 @@ for i in range(0,len(fiducial_images)):
 
 
 
-    patches = annotate_patches(image.shape[:2], patch_size,circles)
-    annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
-    # continuous_patch = annotate_continuous_patches(image.shape[:2], 32,circles)
-
-    image = image*255
-    image = image.astype(np.uint8)
-    image_cp = image.copy()
-    # image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,hard_circles,width)
-    image = plot_circles_in_image(image,circles, width)
-    # test = input()
-
-    save_image(image,'/home/huifang/workspace/code/fiducial_remover/temp_result/method/hough_detection/'+str(i)+'.png')
-    continue
-
+    # patches = annotate_patches(image.shape[:2], patch_size,circles)
+    # annotation_image = get_image_mask_from_annotation(image.shape[:2], patches, patch_size)
+    # # continuous_patch = annotate_continuous_patches(image.shape[:2], 32,circles)
     #
-    f,a = plt.subplots(1,2,figsize=(20, 10))
-    # a[0].figure(figsize=(12, 12))
-    a[0].imshow(image)
-    # a[0].imshow(1-mask, cmap='binary', alpha=0.6)
-    a[1].imshow(annotation_image)
-    plt.show()
+    # # image = image*255
+    # # image = image.astype(np.uint8)
+    # # image_cp = image.copy()
+    # # image = plot_circles_in_image(image,in_tissue_circles,out_tissue_circles,hard_circles,width)
+    # # image = plot_circles_in_image(image,circles, width)
+    # # test = input()
+    #
+    # # save_image(image,'/home/huifang/workspace/code/fiducial_remover/temp_result/method/hough_detection/'+str(i)+'.png')
+    # # continue
+    #
+    # #
+    # f,a = plt.subplots(1,2,figsize=(20, 10))
+    # # a[0].figure(figsize=(12, 12))
+    # a[0].imshow(mask)
+    # # a[0].imshow(1-mask, cmap='binary', alpha=0.6)
+    # a[1].imshow(patches)
+    # plt.show()
 
 
     # if SAVE_FILE:

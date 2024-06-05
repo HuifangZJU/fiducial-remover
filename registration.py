@@ -43,9 +43,9 @@ def get_blended_image(img_path1,img_path2):
     # blended_image = cv2.addWeighted(registered_image1, alpha, registered_image2, 1 - alpha, 0)
 
     # visualization
+
     image1 = get_gray_image(img_path1)
     image2 = get_gray_image(img_path2)
-
     # image1 = image1 / 255
     # image2 = image2 / 255
     # plt.imshow(image1,cmap='gray')
@@ -54,7 +54,16 @@ def get_blended_image(img_path1,img_path2):
 
     # # Blend the two adjusted images to overlay them
     alpha = 0.5  # Adjust this value to control the blending transparency
-    blended_image = alpha* image1 + (1 - alpha) * (1-image2)
+    try:
+        blended_image = alpha* image1 + (1 - alpha) * (1-image2)
+    except:
+        # Create a new array with the maximum shape
+        max_shape = (max(image1.shape[0], image2.shape[0]), max(image1.shape[1], image2.shape[1]))
+        blended_image = np.zeros(max_shape, dtype=np.float64)
+
+        # Place img1 and img2 into overlay_img
+        blended_image[:image1.shape[0], :image1.shape[1]] += alpha* image1
+        blended_image[:image2.shape[0], :image2.shape[1]] += (1 - alpha) * (1-image2)
     return blended_image
 
 test_image_path = '/home/huifang/workspace/data/imagelists/fiducial_previous/st_image_trainable_fiducial.txt'
@@ -66,21 +75,22 @@ files = f.readlines()
 # registration_image_list =  '/home/huifang/workspace/data/imagelists/UnwarpJ_cytassist_with_fiducial_registration_list.txt'
 # image_path = '/home/huifang/workspace/code/backgroundremover/bgrm_out/'
 # image_path = '/home/huifang/workspace/code/fiducial_remover/temp_result/registration/with_fiducial/'
-image_path1 = '/home/huifang/workspace/code/fiducial_remover/temp_result/cytassist/with_fiducial/'
-image_path2 = '/home/huifang/workspace/code/fiducial_remover/temp_result/cytassist/without_fiducial/'
+image_path1 = '/home/huifang/workspace/code/fiducial_remover/temp_result/application/registration/with_fiducial/'
+# image_path2 = '/home/huifang/workspace/code/fiducial_remover/temp_result/application/registration/with_fiducial/'
+image_path2 = '/home/huifang/workspace/code/fiducial_remover/temp_result/application/registration/without_fiducial/'
 # f_list = open(registration_image_list,'w')
-for i in range(0,15):
-    if i==2:
-        continue
-    # image_id = registration_pair[i]
-    # id1 = image_id[0]
-    # id2 = image_id[1]
-    # # img_path1 = files[id1].split(' ')[0]
-    # # img_path2 = files[id2].split(' ')[0]
+for i in range(0,20):
+    # if i==2:
+    #     continue
+    image_id = registration_pair[i]
+    id1 = image_id[0]
+    id2 = image_id[1]
+    original_img_path1 = files[id1].split(' ')[0]
+    original_img_path2 = files[id2].split(' ')[0]
     print(i)
-    img_path1 = image_path1 + str(i) + '/' + str(i) + '_with_fiducial_resized.png'
+    img_path1 = image_path1 + str(i) + '/' + str(id1) + '.png'
     # img_path2 = image_path1+str(i)+'/'+str(i)+'_tissue.png'
-    img_path2 = image_path2 + str(i) + '/' + str(i) + '_without_fiducial_resized.png'
+    img_path2 = image_path2 + str(i) + '/' + str(id1) + '.png'
 
     registered_img_path1 = image_path1+str(i)+'/Registered Source Image.png'
     # registered_img_path2 = image_path1 + str(i) + '/Registered Target Image.png'
@@ -94,13 +104,16 @@ for i in range(0,15):
     # plt.imshow(image1)
     # plt.imshow(image2,alpha=0.5)
     # plt.show()
-
-
+    # original_images = get_blended_image('/home/huifang/workspace/code/fiducial_remover/temp_result/application/cytassist/with_fiducial/14/14_tissue.png',
+    #                                     '/home/huifang/workspace/code/fiducial_remover/temp_result/application/cytassist/with_fiducial/14/14_with_fiducial.png')
+    # original_images = get_blended_image('/home/huifang/workspace/code/fiducial_remover/temp_result/application/model_out/recovery/1.png', '/home/huifang/workspace/code/fiducial_remover/temp_result/application/model_out/recovery/55.png')
+    original_images = get_blended_image(original_img_path1,original_img_path2)
     blended_image1 = get_blended_image(img_path1, registered_img_path1)
     blended_image2 = get_blended_image(img_path2, registered_img_path2)
-    f,a =plt.subplots(1,2,figsize=(20,10))
-    a[0].imshow(blended_image1, cmap='gray')  # Use a grayscale colormap for display
-    a[1].imshow(blended_image2, cmap='gray')  # Use a grayscale colormap for display
+    f,a =plt.subplots(1,3,figsize=(20,10))
+    a[0].imshow(original_images,cmap='gray')
+    a[1].imshow(blended_image1, cmap='gray')  # Use a grayscale colormap for display
+    a[2].imshow(blended_image2, cmap='gray')  # Use a grayscale colormap for display
     plt.axis('off')  # Turn off axis labels and ticks
     plt.show()
 
