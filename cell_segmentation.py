@@ -124,7 +124,7 @@ def run_stardist(img,filename,model):
 # lines = file.readlines()
 img_folder = '/media/huifang/data/fiducial/tiff/recovered_tiff/'
 model = StarDist2D.from_pretrained('2D_versatile_he')
-for i in range(16,20):
+for i in range(4,20):
     print(i)
     img1 = plt.imread(img_folder + str(i) + '.tif')
     mask1 = plt.imread(img_folder + str(i) + '_cleaned.png')

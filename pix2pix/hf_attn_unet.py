@@ -1,5 +1,7 @@
 import argparse
 import os
+
+import matplotlib.pyplot as plt
 import numpy as np
 import math
 import itertools
@@ -9,6 +11,7 @@ import sys
 
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
+from losses import *
 
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -22,14 +25,23 @@ import torch.nn.functional as F
 import torch
 from tensorboardX import SummaryWriter
 from utils import divide_batch_into_patches, reconstruct_batch_images
+def get_image_mask_from_annotation(image_size,annotation,step):
+    image_mask = np.zeros(image_size)
+
+    for i in range(annotation.shape[0]):
+        for j in range(annotation.shape[1]):
+            patch_x = i * step
+            patch_y = j * step
+            image_mask[patch_x:patch_x + step, patch_y:patch_y + step] = annotation[i, j]
+    return image_mask
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
-parser.add_argument('--n_epochs', type=int, default=401, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=801, help='number of epochs of training')
 parser.add_argument('--pretrained_name', type=str, default="",
                     help='name of the dataset')
-parser.add_argument('--model_dir', type=str, default="final_attn_unet_test", help='name of the dataset')
+parser.add_argument('--model_dir', type=str, default="final_attn_test", help='name of the dataset')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--lr', type=float, default=0.0001, help='adam: learning rate')
 parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
@@ -61,12 +73,11 @@ if cuda:
     device = 'cuda'
 else:
     device = 'cpu'
-
 # ------ Configure loss -------
-criterion_binary = torch.nn.MSELoss()
+criterion = FocalLoss(alpha=0.95)
 # ------ Configure model -------
 # Initialize generator
-generator = Attention_Generator(with_skip_connection=False)
+generator = Attention_Generator()
 if args.epoch != 0:
     generator.load_state_dict(torch.load(model_save_path +'/%s/g_%d.pth' % (args.pretrained_name, args.epoch)))
 else:
@@ -81,38 +92,50 @@ transforms_rgb = [transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
 transforms_gray = [transforms.ToTensor()]
 
-
-test_data_set = AttnDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='test',test_group=1,aug=False)
-print(len(test_data_set))
-for i in range(test_data_set.__len__(),0,-1):
-    print(i)
-    batch= test_data_set.__getitem__(i)
-    f,a = plt.subplots(1,2)
-    a[0].imshow(batch['A'])
-    a[1].imshow(batch['B'])
-    plt.show()
-
-train_dataloader = DataLoader(AttnDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1,aug=True),
+train_dataloader = DataLoader(AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1),
                               batch_size=args.batch_size, shuffle=True, num_workers=args.n_cpu)
-test_dataloader = DataLoader(AttnDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='test',test_group=1,aug=False),
+test_dataloader = DataLoader(AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='test',test_group=1),
                              batch_size=1, shuffle=False, num_workers=args.n_cpu)
 
-test_samples = cycle(test_dataloader)
+
+
 # Tensor type
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+test_samples = cycle(test_dataloader)
 
-def sample_images(epoch,batches_done):
+def calculate_iou_dice(ground_truth, prediction, threshold=0.5):
+    """
+    Calculate Intersection over Union (IoU) and Dice Coefficient for binary segmentation.
+
+    :param ground_truth: PyTorch tensor of ground truth, shape [1, 1, m, n]
+    :param prediction: PyTorch tensor of predictions (sigmoid output), shape [1, 1, m, n]
+    :param threshold: Threshold to convert sigmoid output to binary format
+    :return: IoU and Dice Coefficient scores
+    """
+    # Flatten the tensors
+    ground_truth_flat = ground_truth.view(-1).bool()
+    prediction_flat = prediction.view(-1) >= threshold  # Apply threshold
+
+    # Intersection and union
+    intersection = (ground_truth_flat & prediction_flat).float().sum()
+    union = (ground_truth_flat | prediction_flat).float().sum()
+
+    # Calculate IoU and Dice
+    iou = (intersection + 1e-6) / (union + 1e-6)
+    dice = (2 * intersection + 1e-6) / (ground_truth_flat.float().sum() + prediction_flat.float().sum() + 1e-6)
+
+    return iou.item(), dice.item()
+
+def compute_test_accuracy():
     """Saves a generated sample from the validation set"""
     test_batch = next(test_samples)
     test_image = test_batch['A'].to(device)
-    test_labels = test_batch['B'].to(device)
-    output = generator(test_image)
-    # img_sample = torch.cat((test_a.data, output.data), -2)
+    test_gt = test_batch['B'].to(device)
+    unet_output = generator(test_image)
+    iou, dice = calculate_iou_dice(test_gt, unet_output)
     save_image(test_image.data, image_save_path+'/%s/%s_%s_img.png' % (args.model_dir,epoch,batches_done), nrow=4, normalize=True)
-    save_image(test_labels.data, image_save_path+'/%s/%s_%s_gt.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
-    save_image(output.data, image_save_path + '/%s/%s_%s_mask.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
-
-
+    save_image(unet_output.data, image_save_path + '/%s/%s_%s_mask.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
+    return iou,dice
 # ------------------------------------------
 #                Training
 # ------------------------------------------
@@ -122,16 +145,13 @@ logger = SummaryWriter(log_save_path + '/%s' % args.model_dir)
 for epoch in range(args.epoch, args.n_epochs):
     for i, batch in enumerate(train_dataloader):
         images = batch['A'].to(device)
-        labels = batch['B'].to(device)
-        predictions = generator(images)
+        masks = batch['B'].to(device)
+        unet_output = generator(images)
         optimizer.zero_grad()
         # compute loss
-        loss = criterion_binary(predictions,labels)
-        # loss_G = loss_pixel
+        loss = criterion(unet_output , masks)
         loss.backward()
-
         optimizer.step()
-
         # --------------
         #  Log Progress
         # --------------
@@ -147,12 +167,10 @@ for epoch in range(args.epoch, args.n_epochs):
             (epoch, args.n_epochs,
              i, len(train_dataloader),
              loss.item(), time_left))
-        # # If at sample interval save image
-        if batches_done % args.sample_interval == 0:
-            sample_images(epoch, batches_done)
         # --------------tensor board--------------------------------#
-        if batches_done % 100 == 0:
-            info = {'loss': loss.item()}
+        if batches_done % args.sample_interval == 0:
+            iou, dice = compute_test_accuracy()
+            info = {'loss': loss.item(), 'test_iou':iou}
             for tag, value in info.items():
                 logger.add_scalar(tag, value, batches_done)
             for tag, value in generator.named_parameters():

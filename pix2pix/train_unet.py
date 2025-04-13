@@ -1,31 +1,14 @@
 import argparse
-import os
-
-import matplotlib.pyplot as plt
-import numpy as np
-import math
-import itertools
 import time
 import datetime
-import sys
-
-import torchvision.transforms as transforms
 from torchvision.utils import save_image
 from losses import *
-
 from torch.utils.data import DataLoader
-from torchvision import datasets
-from torch.autograd import Variable
-
 from models import *
 from datasets import *
 from itertools import cycle
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
 from tensorboardX import SummaryWriter
-from utils import divide_batch_into_patches, reconstruct_batch_images
-
 # ------ device handling -------
 cuda = True if torch.cuda.is_available() else False
 torch.cuda.set_device(0)
@@ -33,39 +16,6 @@ if cuda:
     device = 'cuda'
 else:
     device = 'cpu'
-
-def get_image_mask_from_annotation(image,predition,step):
-    # image_mask = np.zeros(image_size)
-    coarse_mask = image.cpu().detach().squeeze()
-    annotation = predition.cpu().detach().squeeze()
-    image_size = image.shape[2:]
-    image_mask = torch.zeros(image_size)
-    for i in range(annotation.shape[0]):
-        for j in range(annotation.shape[1]):
-            patch_x = i * step
-            patch_y = j * step
-            coarse_patch=coarse_mask[patch_x:patch_x + step, patch_y:patch_y + step]
-            coarse_patch_value = coarse_patch.mean()
-
-            # if coarse_patch_value < 0.22 or coarse_patch_value>0.46 or annotation[i,j]<0.5:
-            if annotation[i,j]<0.7 or coarse_patch_value<0.22:
-                image_mask[patch_x:patch_x + step, patch_y:patch_y + step] = torch.tensor(0)
-            else:
-                image_mask[patch_x:patch_x + step, patch_y:patch_y + step] = torch.tensor(1)
-
-    # refined_mask = coarse_mask*image_mask
-    # refined_mask = refined_mask.numpy().squeeze()
-    # coarse_mask = coarse_mask.numpy().squeeze()
-    # image_mask = image_mask.numpy().squeeze()
-    # annotation = annotation.numpy().squeeze()
-    # f,a = plt.subplots(2,2)
-    # a[0,0].imshow(coarse_mask)
-    # a[0,1].imshow(annotation)
-    # a[1,0].imshow(image_mask)
-    # a[1,1].imshow(refined_mask)
-    # plt.show()
-    return image_mask.to(device)
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
@@ -99,13 +49,11 @@ os.makedirs(log_save_path + '/%s' % args.model_dir, exist_ok=True)
 # ------------------------------------------
 
 # ------ Configure loss -------
-# criterion= torch.nn.MSELoss()
 criterion = FocalLoss(alpha=0.95)
-spatial_criterion = SpatialConsistencyLoss()
 # ------ Configure model -------
 # Initialize generator
-# generator = Rich_Parrel_Attention_Generator()
-generator = CNN_in_parrel_Generator()
+generator = Rich_Parrel_Attention_Generator()
+
 if args.epoch != 0:
     generator.load_state_dict(torch.load(model_save_path +'/%s/g_%d.pth' % (args.pretrained_name, args.epoch)))
 else:
@@ -120,7 +68,6 @@ transforms_rgb = [transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
 transforms_gray = [transforms.ToTensor()]
 
-
 test_data_set = AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1)
 for i in range(0,test_data_set.__len__(),1):
     # print(i)
@@ -133,8 +80,6 @@ for i in range(0,test_data_set.__len__(),1):
     a[0].imshow(batch['A'])
     a[0].imshow(batch['B'],cmap='binary',alpha=0.6)
     a[1].imshow(batch['C'])
-    # mask = get_image_mask_from_annotation(batch['B'].size,batch['C'],16)
-    # a[1].imshow(mask,cmap='binary',alpha=0.6)
     plt.show()
 
 train_dataloader = DataLoader(AttnInparrelDataset(transforms_a=transforms_rgb,transforms_b=transforms_gray,mode='train',test_group=1),
@@ -181,12 +126,7 @@ def compute_test_accuracy():
     unet_output,transformer_output = generator(test_image)
     iou, dice = calculate_iou_dice(test_gt, unet_output)
     save_image(test_image.data, image_save_path+'/%s/%s_%s_img.png' % (args.model_dir,epoch,batches_done), nrow=4, normalize=True)
-    # save_image(test_gt.data, image_save_path+'/%s/%s_%s_gt.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
     save_image(unet_output.data, image_save_path + '/%s/%s_%s_mask.png' % (args.model_dir,epoch, batches_done), nrow=4, normalize=True)
-    # save_image(transformer_output.data, image_save_path + '/%s/%s_%s_patch.png' % (args.model_dir, epoch, batches_done), nrow=4,
-    #            normalize=True)
-    #     accuracies.append(accuracy)
-    # overall_accuracy = sum(accuracies) / len(accuracies)
     return iou,dice
 # ------------------------------------------
 #                Training
@@ -198,35 +138,10 @@ for epoch in range(args.epoch, args.n_epochs):
     for i, batch in enumerate(train_dataloader):
         images = batch['A'].to(device)
         masks = batch['B'].to(device)
-        patches = batch['C'].to(device)
-        patches = patches.to(torch.float32)
-        is_binary = batch['D'].to(device)
-        if is_binary:
-            BI_FLAG = True
-            bi_images = images
-            bi_patches = patches
-        if BI_FLAG:
-            _,bi_transformer_output = generator(bi_images)
         unet_output, transformer_output = generator(images)
-        loss_window = get_image_mask_from_annotation(masks,transformer_output,32)
-
         optimizer.zero_grad()
-        # compute loss
-        unet_loss = criterion(unet_output*loss_window,masks*loss_window)
-        # binary_loss = criterion(transformer_output,patches)
-        spatial_loss = spatial_criterion(unet_output,transformer_output)
-        if BI_FLAG:
-            binary_loss = criterion(bi_transformer_output,bi_patches)
-            loss = unet_loss + binary_loss
-            print("unet + binary")
-        else:
-            binary_loss=torch.tensor(0).to(device)
-            loss = unet_loss
-            print("unet")
-        # loss = unet_loss + binary_loss + spatial_loss
-        # loss_G = loss_pixel
+        loss = criterion(unet_output,masks)
         loss.backward()
-
         optimizer.step()
         # --------------
         #  Log Progress
@@ -246,17 +161,14 @@ for epoch in range(args.epoch, args.n_epochs):
         # --------------tensor board--------------------------------#
         if batches_done % args.sample_interval == 0:
             iou, dice = compute_test_accuracy()
-            info = {'loss': loss.item(), 'unet loss': unet_loss.item(),'binary loss':binary_loss.item(),'spatial loss':spatial_loss.item(),'test_iou':iou}
+            info = {'loss': loss.item(), 'unet loss': loss.item(),'test_iou':iou}
             for tag, value in info.items():
                 logger.add_scalar(tag, value, batches_done)
             for tag, value in generator.named_parameters():
                 tag = tag.replace('.', '/')
                 logger.add_histogram(tag, value.data.cpu().numpy(), batches_done)
-                # logger.add_histogram(tag+'grad', value.grad.data.cpu().numpy(),batches_done+1)
-
     if args.checkpoint_interval != -1 and epoch % args.checkpoint_interval == 0:
         torch.save(generator.state_dict(), model_save_path+'/%s/g_%d.pth' % (args.model_dir,epoch))
-
 # save final model
 torch.save(generator.state_dict(),  model_save_path+'/%s/g_%d.pth' % (args.model_dir,epoch))
 logger.close()

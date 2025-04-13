@@ -17,16 +17,19 @@ from scipy.ndimage import label, find_objects
 from skimage.color import label2rgb
 from skimage.transform import resize
 from PIL import Image
-
-def remove_bg(src_img):
+import imageio
+def remove_bg(src_img_path, out_img_path):
     model_choices = ["u2net", "u2net_human_seg", "u2netp"]
-    img,mask = remove(src_img, model_name=model_choices[2],
-                 alpha_matting=False,
+    f = open(src_img_path, "rb")
+    data = f.read()
+    img = remove(data, model_name=model_choices[0],
+                 alpha_matting=True,
                  alpha_matting_foreground_threshold=240,
                  alpha_matting_background_threshold=10,
                  alpha_matting_erode_structure_size=10,
                  alpha_matting_base_size=1000)
-    return img
+    f.close()
+    img[0].save(out_img_path)
 
 def get_rgb_img(rgba_image):
 
@@ -40,10 +43,10 @@ def get_rgb_img(rgba_image):
     rgb_array = np.array(blended_image)
     return rgb_array
 
-def segregate(img):
-    rgb_image = get_rgb_img(img)
-    img = np.asarray(img)
-    binary_mask = img[:, :, 3].copy()
+def segregate(rgb_image,binary_mask):
+    # rgb_image = get_rgb_img(img)
+    # img = np.asarray(img)
+    # binary_mask = img[:, :, 3].copy()
     # plt.imshow(binary_mask)
     # plt.show()
     # binary_mask[img[:, :, 3] > 50] = 1
@@ -53,7 +56,7 @@ def segregate(img):
     # test = input()
 
     # Apply thresholding to create a binary mask
-    _, binary_mask = cv2.threshold(binary_mask, 5, 255, cv2.THRESH_BINARY)
+    # _, binary_mask = cv2.threshold(binary_mask, 5, 255, cv2.THRESH_BINARY)
     # plt.imshow(binary_mask)
     # plt.show()
 
@@ -89,11 +92,16 @@ def segregate(img):
 
     # Re-label the connected components
     labeled_mask, num_features = label(labeled_mask > 0)
-    # print(f"Number of disconnected components: {num_features}")
+    print(f"Number of disconnected components: {num_features}")
 
     # Overlay labeled mask on RGB image
     overlay = label2rgb(labeled_mask, image=rgb_image, bg_label=0, alpha=0.5, kind='overlay')
-    return overlay,num_features
+    # Convert the overlay image to an RGBA image (adds an alpha channel)
+    rgba_overlay = np.zeros((overlay.shape[0], overlay.shape[1], 4), dtype=overlay.dtype)
+    rgba_overlay[..., :3] = overlay
+    rgba_overlay[..., 3] = (labeled_mask > 0).astype(overlay.dtype) * 1.0  # Alpha channel
+    # rgba_overlay = rgba_overlay.astype(np.uint8)
+    return rgba_overlay,num_features
 
 def get_image_mask_from_annotation(image_size,annotation,step):
     image_mask = np.zeros(image_size)
@@ -656,11 +664,11 @@ fiducial_ious_cnn_position=0
 binary_ious=0
 cnt=0
 Visualization = True
-for i in range(0,72):
+for i in range(28,num_files):
     print(str(num_files)+'---'+str(i))
     start_time = time.time()
     image_name = files[i]
-
+    image_name = "/home/huifang/workspace/code/fiducial_remover/location_annotation/tissue_hires_image.png"
     # directory, _ = os.path.split(image_name.split(' ')[0])
     # aligned_path = directory+'/aligned_fiducials.jpg'
     # label_percentage = float(image_name.split(' ')[1])
@@ -715,13 +723,34 @@ for i in range(0,72):
     # img_auto = plot_circles_in_image(img_original, circles, 2)
 
 
-    # cnn_mask,position,cnn_position_mask,cnn_position_output,single_cnn_output = run(img_var,img_np)
+    cnn_mask,position,cnn_position_mask,cnn_position_output,single_cnn_output = run(img_var,img_np)
+    # cleaned_img,mask = remove_bg(single_cnn_output)
+    plt.imshow(cnn_mask)
+    plt.show()
 
-    cleaned_img = remove_bg(img_np)
-    fragments,num_tissue = segregate(cleaned_img)
-    cleaned_img.save('./temp_result/application/bgrm/' + str(i) + 'original2.png')
-    save_rgb_image(fragments, './temp_result/application/fragments/' + str(i) + '_'+str(num_tissue)+'original2.png')
+    plt.imshow(single_cnn_output)
+    plt.show()
+    pil_image = Image.fromarray(single_cnn_output)
+    pil_image.save(image_name.split(' ')[0][:-4] + '_recovered.png')
 
+    remove_bg(image_name.split(' ')[0][:-4] + '_recovered.png', image_name.split(' ')[0][:-4] + '_cleaned.png')
+
+    get_rgb_img(image_name.split(' ')[0][:-4] + '_cleaned.png', image_name.split(' ')[0][:-4] + '_cleaned_with_bg.png')
+    fragments,num_tissue = segregate(cleaned_img,mask)
+
+    plt.imshow(fragments)
+    plt.show()
+
+
+
+
+
+
+    save_rgb_image(cleaned_img,'./temp_result/application/bgrm/' + str(i) + '.png')
+    # cleaned_img.save('./temp_result/application/bgrm/' + str(i) + '.png')
+    # save_rgb_image(fragments, './temp_result/application/fragments/' + str(i) + '_'+str(num_tissue)+'.png')
+    imageio.imwrite('./temp_result/application/fragments/' + str(i) + '_'+str(num_tissue)+'.png', fragments)
+    test = input()
     continue
     # # cnn_mask, position, cnn_position_mask = run(img_var, img_np,recovery=False)
     #

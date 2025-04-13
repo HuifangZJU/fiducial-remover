@@ -52,8 +52,12 @@ def get_blended_image(img_path1,img_path2):
     # plt.imshow(image2,cmap='gray',alpha=0.5)
     # plt.show()
 
+
     # # Blend the two adjusted images to overlay them
     alpha = 0.5  # Adjust this value to control the blending transparency
+    # plt.imshow( alpha* image1 + (1 - alpha) * (1-image2),cmap='gray')
+    # plt.show()
+
     try:
         blended_image = alpha* image1 + (1 - alpha) * (1-image2)
     except:
@@ -109,13 +113,20 @@ for i in range(0,20):
     # original_images = get_blended_image('/home/huifang/workspace/code/fiducial_remover/temp_result/application/model_out/recovery/1.png', '/home/huifang/workspace/code/fiducial_remover/temp_result/application/model_out/recovery/55.png')
     original_images = get_blended_image(original_img_path1,original_img_path2)
     blended_image1 = get_blended_image(img_path1, registered_img_path1)
+    blended_image1 = (blended_image1-np.min(blended_image1))/(np.max(blended_image1)-np.min(blended_image1))
     blended_image2 = get_blended_image(img_path2, registered_img_path2)
-    f,a =plt.subplots(1,3,figsize=(20,10))
-    a[0].imshow(original_images,cmap='gray')
-    a[1].imshow(blended_image1, cmap='gray')  # Use a grayscale colormap for display
-    a[2].imshow(blended_image2, cmap='gray')  # Use a grayscale colormap for display
-    plt.axis('off')  # Turn off axis labels and ticks
-    plt.show()
+
+    blended_image2 = (blended_image2 - np.min(blended_image2)) / (np.max(blended_image2) - np.min(blended_image2))
+    # Save images
+    outpath='/home/huifang/workspace/code/fiducial_remover/temp_result/application/registration/figures/'
+    plt.imsave(outpath+str(i)+'_blended_image1.png', blended_image1, cmap='gray')
+    plt.imsave(outpath+str(i)+'_blended_image2.png', blended_image2, cmap='gray')
+    # f,a =plt.subplots(1,3,figsize=(20,10))
+    # a[0].imshow(original_images,cmap='gray')
+    # a[1].imshow(blended_image1, cmap='gray')  # Use a grayscale colormap for display
+    # a[2].imshow(blended_image2, cmap='gray')  # Use a grayscale colormap for display
+    # plt.axis('off')  # Turn off axis labels and ticks
+    # plt.show()
 
 # f_list.close()
 

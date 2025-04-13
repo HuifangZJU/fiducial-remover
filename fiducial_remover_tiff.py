@@ -1,8 +1,8 @@
 import argparse
 import statistics
 import time
-
 import torch
+from backgroundremover.bg import remove
 from omegaconf import OmegaConf
 import yaml
 from scipy.ndimage import zoom
@@ -31,6 +31,7 @@ def get_image_mask_from_annotation(image_size,annotation,step):
             patch_y = j * step
             image_mask[patch_x:patch_x + step, patch_y:patch_y + step] = annotation[i, j]
     return image_mask
+
 
 
 def apply_gaussian_kernel(image, sigma=1.0):
@@ -179,6 +180,7 @@ def get_cnn_position_mask(cnn_mask,position):
 def get_inpainting_result(inpainter_image,mask):
     mask = torch.from_numpy(mask).unsqueeze(0).unsqueeze(0).to(device)
     inpainter_image_var = torch.from_numpy(inpainter_image).unsqueeze(0).to(device)
+
     batch = dict(image=inpainter_image_var, mask=mask)
     with torch.no_grad():
         batch = inpainter(batch)
@@ -190,7 +192,52 @@ def get_inpainting_result(inpainter_image,mask):
     cur_res = np.clip(cur_res * 255, 0, 255).astype('uint8')
     return cur_res
 
+def remove_bg(src_img_path, out_img_path):
+    model_choices = ["u2net", "u2net_human_seg", "u2netp"]
+    f = open(src_img_path, "rb")
+    data = f.read()
+    img = remove(data, model_name=model_choices[0],
+                 alpha_matting=True,
+                 alpha_matting_foreground_threshold=240,
+                 alpha_matting_background_threshold=10,
+                 alpha_matting_erode_structure_size=10,
+                 alpha_matting_base_size=1000)
+    f.close()
+    img[0].save(out_img_path)
+def get_rgb_img(path,out_path):
+    # Open the RGBA image
+    rgba_image = Image.open(path).convert("RGBA")
 
+    # Convert RGBA image to a NumPy array
+    rgba_array = np.array(rgba_image)
+
+    # Extract the alpha channel
+    alpha_channel = rgba_array[..., 3]
+
+    # Set the alpha channel to binary: fully transparent (0) or fully opaque (255)
+    binary_alpha = np.where(alpha_channel > 200, 255, 0).astype(np.uint8)
+
+    # Replace the original alpha channel with the binary alpha
+    rgba_array[..., 3] = binary_alpha
+
+
+
+    # Convert the modified NumPy array back to a PIL RGBA image
+    binary_rgba_image = Image.fromarray(rgba_array, 'RGBA')
+
+    # Create a white background image (RGBA)
+    white_background = Image.new('RGBA', binary_rgba_image.size, (255, 255, 255, 255))
+
+    # Blend the binary RGBA image with the white background
+    blended_image = Image.alpha_composite(white_background, binary_rgba_image).convert('RGB')
+
+    # Convert the blended image to a NumPy array and return
+    rgb_array = np.array(blended_image)
+    # Convert the NumPy array to a PIL Image
+    img = Image.fromarray(rgb_array)
+
+    # Save the image as a PNG
+    img.save(out_path)
 
 
 def transform_points(points, tx, ty, scale_x, scale_y, angle):
@@ -428,6 +475,60 @@ def stitch_patches_incremental(results, positions, original_shape):
 
     return stitched_image
 
+
+
+def run_single_tiff(tiff_image_path,high_res_image_path):
+
+
+    tiff_image = plt.imread(tiff_image_path)
+    img_var, _ = get_image_var(high_res_image_path)
+    cnn_mask = get_circle_and_position_mask(img_var, generator)
+    zoom_factors = (tiff_image.shape[0] / cnn_mask.shape[0], tiff_image.shape[1] / cnn_mask.shape[1])
+    cnn_mask = zoom(cnn_mask, zoom_factors, order=0)
+    # rgba images
+    if tiff_image.shape[2] == 4:
+        tiff_image = tiff_image[:, :, :3]
+
+    inpainter_image = np.transpose(tiff_image, (2, 0, 1))
+    inpainter_image = inpainter_image.astype('float32') / 255
+
+    mid_h, mid_w = tiff_image.shape[0] // 2, tiff_image.shape[1] // 2
+    patch_size = 3000  # Adjust this value as needed to get more patches
+    img_patches, mask_patches, positions, original_shape = divide_image(inpainter_image, cnn_mask, patch_size)
+    print(len(img_patches))
+    # Process each patch and store the results
+    results = []
+    i = 0
+    for img_patch, mask_patch in zip(img_patches, mask_patches):
+        print(i)
+        if np.any(mask_patch == 1):
+            # Process through inpainting network if mask contains 1s
+            result = get_inpainting_result(img_patch, mask_patch)
+            result = np.transpose(result, (2, 0, 1))
+            i = i + 1
+        else:
+            # Use the original image patch if mask does not contain 1s
+            result = img_patch
+            result = np.clip(result * 255, 0, 255).astype('uint8')
+
+        results.append(result)
+
+    # Stitch the processed patches back together incrementally
+    stitched_result = stitch_patches_incremental(results, positions, original_shape)
+    stitched_result = np.transpose(stitched_result, (1, 2, 0))
+    # print(stitched_result.shape)
+    pil_image = Image.fromarray(stitched_result)
+    # print(pil_image.mode)
+    #
+    # plt.imshow(stitched_result)
+    # plt.show()
+
+    pil_image.save(tiff_image_path[:-4] + '_recovered.png')
+
+    remove_bg(tiff_image_path[:-4] + '_recovered.png', tiff_image_path[:-4] + '_cleaned.png')
+    get_rgb_img(tiff_image_path[:-4] + '_cleaned.png', tiff_image_path[:-4] + '_cleaned_with_bg.png')
+
+
 # ------ arguments handling -------
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
@@ -469,56 +570,16 @@ transforms_rgb = transforms.Compose([transforms.ToTensor(),
                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 
-high_res_image_path = '/home/huifang/workspace/code/fiducial_remover/overlap_annotation/4.png'
-tiff_image_path = '/media/huifang/data/fiducial/tiff/Visium_Mouse_Olfactory_Bulb_image.tif'
-tiff_image = plt.imread(tiff_image_path)
-
-
-img_var,_ = get_image_var(high_res_image_path)
-cnn_mask = get_circle_and_position_mask(img_var,generator)
-zoom_factors = (tiff_image.shape[0] / cnn_mask.shape[0], tiff_image.shape[1] / cnn_mask.shape[1])
-cnn_mask = zoom(cnn_mask, zoom_factors, order=0)
-save_gray_image(cnn_mask,tiff_image_path[:-4]+'_mask.tif')
-print('done')
-test = input()
-
-
-# rgba images
-if tiff_image.shape[2] == 4:
-    tiff_image = tiff_image[:,:,:3]
-
-# plt.imshow(tiff_image)
-# plt.imshow(1 - cnn_mask, cmap='binary', alpha=0.6)
-# plt.show()
-
-inpainter_image = np.transpose(tiff_image,(2,0,1))
-inpainter_image = inpainter_image.astype('float32')/255
-
-mid_h, mid_w = tiff_image.shape[0] // 2, tiff_image.shape[1] // 2
-patch_size = 3000  # Adjust this value as needed to get more patches
-img_patches, mask_patches, positions, original_shape = divide_image(inpainter_image, cnn_mask, patch_size)
-print(len(img_patches))
-# Process each patch and store the results
-results = []
-i=0
-for img_patch, mask_patch in zip(img_patches, mask_patches):
+imglist= "/media/huifang/data/fiducial/tiff_data/data_list.txt"
+file = open(imglist)
+lines = file.readlines()
+num_files = len(lines)
+for i in range(11,num_files):
     print(i)
-    if np.any(mask_patch == 1):
-        # Process through inpainting network if mask contains 1s
-        result = get_inpainting_result(img_patch, mask_patch)
-        result = np.transpose(result,(2,0,1))
-        i=i+1
-    else:
-        # Use the original image patch if mask does not contain 1s
-        result = img_patch
-        result = np.clip(result * 255, 0, 255).astype('uint8')
+    line = lines[i]
+    line = line.rstrip().split(' ')
+    tiff_image_path = line[0]
 
-    results.append(result)
+    high_res_image_path = line[2]
+    run_single_tiff(tiff_image_path,high_res_image_path)
 
-# Stitch the processed patches back together incrementally
-stitched_result = stitch_patches_incremental(results, positions, original_shape)
-stitched_result = np.transpose(stitched_result, (1, 2, 0))
-pil_image = Image.fromarray(stitched_result)
-pil_image.save(tiff_image_path[:-4]+'_recovered.tif')
-plt.imshow(stitched_result)
-plt.show()

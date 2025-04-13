@@ -22,15 +22,15 @@ def select_area(ax, image):
     return rect
 
 def interactive_crop_pdf(input_path, output_folder):
-    images = convert_from_path(input_path, dpi=200)  # Convert PDF to list of images
+    images = convert_from_path(input_path, dpi=300)  # Convert PDF to list of images
     dpi_scale = 72 / 200
     with open(input_path, "rb") as file:
         reader = PyPDF2.PdfReader(file)
         assert len(images) == len(reader.pages), "Number of images and pages should match"
 
         for i, image in enumerate(images):
-            if i <8:
-                continue
+            # if i <6:
+            #     continue
             # print(image.size)
             fig, ax = plt.subplots()
             # ax.imshow(image)
@@ -55,4 +55,4 @@ def interactive_crop_pdf(input_path, output_folder):
 
 
 # Usage
-interactive_crop_pdf("/home/huifang/workspace/paper/fiducial application/36x36_phdposters_template.pdf", "/home/huifang/workspace/paper/fiducial application/")
+interactive_crop_pdf("/home/huifang/workspace/paper/fiducial application/gene_imputation.pdf", "/home/huifang/workspace/paper/fiducial application/")

@@ -24,13 +24,14 @@ def get_rgb_img(path):
 
 
 # Example RGB image
-# rgb_image = plt.imread('/home/huifang/workspace/code/fiducial_remover/location_annotation/64.png')
-rgb_image = get_rgb_img('/home/huifang/workspace/code/backgroundremover/bgrm_out/106.png')
+rgb_image = plt.imread('/home/huifang/workspace/code/fiducial_remover/location_annotation/17.png')
+# rgb_image = get_rgb_img('/home/huifang/workspace/code/backgroundremover/bgrm_out/17.png')
 # Example binary mask
-img = plt.imread('/home/huifang/workspace/code/backgroundremover/bgrm_out/106.png')
+img = plt.imread('/home/huifang/workspace/code/fiducial_remover/temp_result/application/bgrm-backup/17.png')
+
 binary_mask = img[:, :, 3]
-binary_mask[binary_mask> 5] = 1
-binary_mask[binary_mask< 5]=0
+binary_mask[img[:, :, 3]> 0.3] = 1
+binary_mask[img[:, :, 3]< 0.3]=0
 binary_mask = resize(binary_mask, rgb_image.shape[:2], order=0, preserve_range=True, anti_aliasing=False).astype(np.uint8)
 
 # Find connected components
