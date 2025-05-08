@@ -3,7 +3,8 @@ import scanpy as sc
 import pandas as pd
 from scipy.spatial import cKDTree
 import matplotlib.pyplot as plt
-
+import warnings
+warnings.filterwarnings("ignore", message="Transforming to str index.")
 
 
 def load_h5ad(h5ad_file):
@@ -170,7 +171,7 @@ def compare_spotlevel_metrics_nn(original_adata, imputed_adata, method_name, max
         coords_orig = orig_sub.obsm["spatial"]
         plt.figure(figsize=(6, 6))
         scat = plt.scatter(coords_orig[:, 1], coords_orig[:, 0], c=spot_corrs, cmap="viridis",
-                           s=30, alpha=0.8, edgecolor='k')
+                           s=30, alpha=0.8)
         plt.gca().invert_yaxis()  # common for Visium data
         cbar = plt.colorbar(scat)
         cbar.set_label("Spot-wise correlation", fontsize=12)
@@ -314,7 +315,6 @@ def plot_gene_spatial_comparison(adata_list, method_names, gene, title=None):
             c=expr,
             cmap="viridis",
             s=50,
-            edgecolor="k",
             alpha=0.8,
             vmin=vmin,
             vmax=vmax
@@ -343,7 +343,7 @@ def filter_genes_by_variance(adata, genes, threshold=0.1):
 # Example usage:
 if __name__ == "__main__":
     # Suppose:
-    original_adata = load_h5ad("/media/huifang/data/fiducial/tiff_data/Visium_FFPE_Human_Cervical_Cancer_spatial/Visium_FFPE_Human_Cervical_Cancer_raw_feature_bc_matrix.h5ad")
+    original_adata = load_h5ad("/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix.h5ad")
     original_adata.var_names = original_adata.var_names.astype(str)
     # Now safely make them unique
     original_adata.var_names_make_unique()
@@ -351,28 +351,28 @@ if __name__ == "__main__":
 
 
     methodA_adata = load_h5ad(
-        "/media/huifang/data/fiducial/tiff_data/Visium_FFPE_Human_Cervical_Cancer_spatial/Visium_FFPE_Human_Cervical_Cancer_raw_feature_bc_matrix_res100_imputed_1.h5ad")
+        "/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix_original_imputed_1.h5ad")
     # Ensure var names are plain strings
     methodA_adata.var_names = methodA_adata.var_names.astype(str)
     # Now safely make them unique
     methodA_adata.var_names_make_unique()
 
     methodB_adata = load_h5ad(
-        "/media/huifang/data/fiducial/tiff_data/Visium_FFPE_Human_Cervical_Cancer_spatial/Visium_FFPE_Human_Cervical_Cancer_raw_feature_bc_matrix_res100_imputed_2.h5ad")
+        "/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix_original_imputed_2.h5ad")
     # Ensure var names are plain strings
     methodB_adata.var_names = methodB_adata.var_names.astype(str)
     # Now safely make them unique
     methodB_adata.var_names_make_unique()
 
     methodC_adata = load_h5ad(
-        "/media/huifang/data/fiducial/tiff_data/Visium_FFPE_Human_Cervical_Cancer_spatial/Visium_FFPE_Human_Cervical_Cancer_raw_feature_bc_matrix_res100_imputed_3.h5ad")
+        "/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix_original_imputed_3.h5ad")
     # Ensure var names are plain strings
     methodC_adata.var_names = methodC_adata.var_names.astype(str)
     # Now safely make them unique
     methodC_adata.var_names_make_unique()
 
     methodD_adata = load_h5ad(
-        "/media/huifang/data/fiducial/tiff_data/Visium_FFPE_Human_Cervical_Cancer_spatial/Visium_FFPE_Human_Cervical_Cancer_raw_feature_bc_matrix_res100_imputed_4.h5ad")
+        "/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix_original_imputed_4.h5ad")
     # Ensure var names are plain strings
     methodD_adata.var_names = methodD_adata.var_names.astype(str)
     # Now safely make them unique

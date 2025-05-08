@@ -242,7 +242,7 @@ for i in [0,4]:
     # 7. Scale and cap values at 10
     sc.pp.scale(adata, max_value=10)
     coords = adata.obsm["spatial"]  # shape (n_obs, 2)
-    visualize_gene_features(adata)
+    # visualize_gene_features(adata)
     # continue
 
 

@@ -144,24 +144,7 @@ def get_overlay_ax(ax, image, mask):
     # colors=['#501d8a','#1c8041','#e55709','#7e2f8c','#52bcec','#73aa43']
     # colors=['#c6d182','#eae0e9', '#e0c7e3', '#ae98b6', '#846e89']
     colors=['#d0b0c8','#b06098','#380850','blue']
-    # # Create a ListedColormap
-    # custom_cmap = mcolors.ListedColormap(color_values)
 
-    # colors = ['#FEDACC', '#FD9778']
-    # colors = ['#FEDACC','#FDD2C2','#FDCBB9','#FDC3B0','#FDBCA6','#FD6B48']
-    # FEDACC
-    # FDD2C2
-    # FDCBB9
-    # FDC3B0
-    # FDBCA6
-    # FDB49D
-    # FDAD94
-    # FDA58A
-    # FD9E81
-    # FD9778
-
-    # Create the colormap
-    # custom_cmap = LinearSegmentedColormap.from_list('custom_cmap', colors)
     custom_cmap = mcolors.ListedColormap(colors)
     # Overlay the grayscale mask with a colormap and transparency, ignoring zero (NaN) areas
     # overlay = ax.imshow(mask, cmap='Blues', alpha=0.6, vmin=0, vmax=1)

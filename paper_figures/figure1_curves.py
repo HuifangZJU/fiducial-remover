@@ -7,6 +7,7 @@ from matplotlib.transforms import Transform
 from matplotlib.ticker import FuncFormatter, FixedLocator
 from matplotlib.scale import ScaleBase
 import numpy as np
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Transform
 from matplotlib.ticker import FuncFormatter, FixedLocator
@@ -133,32 +134,6 @@ class CustomXScale(ScaleBase):
         # Set major ticks at the endpoints of each interval
         axis.set_major_locator(FixedLocator([0, 10, 30, 50, 100]))
         axis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.0f}'))
-
-
-register_scale(CustomYScale)
-
-register_scale(CustomXScale)
-
-tissue_percentage = np.array(np.load('./result/percentage.npy'))
-iou1 = np.array(np.load('./result/iou_vispros.npy'))
-iou2 = np.array(np.load('./result/iou_unets.npy'))
-iou3 = np.array(np.load('./result/iou_10xs.npy'))
-# Sort the tissue_percentage and IoUs
-sorted_indices = np.argsort(tissue_percentage)
-tissue_percentage = tissue_percentage[sorted_indices]
-iou1 = iou1[sorted_indices]
-iou2 = iou2[sorted_indices]
-iou3 = iou3[sorted_indices]
-
-
-ranges = {
-    "=0": (0, 0),
-    "0-10": (0, 10),
-    "10-30": (10, 30),
-    "30-50": (30, 50),
-    ">50": (50, np.inf)
-}
-
 # Function to calculate average IoU within specified percentage ranges
 def average_iou_by_range(tissue_percentage, iou, ranges):
     avg_iou = {}
@@ -177,94 +152,128 @@ def average_iou_by_range(tissue_percentage, iou, ranges):
                 avg_iou[label] = np.nan  # Handle empty ranges gracefully
     return avg_iou
 
-# Calculate average IoUs for each curve and range
-avg_iou1 = average_iou_by_range(tissue_percentage, iou1, ranges)
-avg_iou2 = average_iou_by_range(tissue_percentage, iou2, ranges)
-avg_iou3 = average_iou_by_range(tissue_percentage, iou3, ranges)
+register_scale(CustomYScale)
 
-# Prepare data for plotting
-range_labels = list(ranges.keys())
-x_positions = [0, 5, 20, 40, 75]  # Approximate x positions for ranges
+register_scale(CustomXScale)
 
-plt.figure(figsize=(10, 6))
-plt.grid(True,axis='x')
-# plt.scatter(tissue_percentage, iou1, label='Vispro', color='#e6b532', marker='o', alpha=0.4)
-# plt.scatter(tissue_percentage, iou2, label='UNet', color='#d75425', marker='s', alpha=0.4)
-# plt.scatter(tissue_percentage, iou3, label='10X', color='#52bcec', marker='^', alpha=0.4)
-plt.scatter(tissue_percentage, iou1, label='Vispro', color='#501d8a', marker='o', s=40, alpha=0.4)
-plt.scatter(tissue_percentage, iou2, label='Baseline U-Net', color='#1c8041', marker='o', alpha=0.4)
-plt.scatter(tissue_percentage, iou3, label='10X', color='#e55709', marker='o', alpha=0.4)
-# Plot averaged IoU curves with larger intervals
-# plt.plot(x_positions, [avg_iou1[label] for label in range_labels], color='#e6b532', marker='o', linestyle='-', linewidth=2)
-# plt.plot(x_positions, [avg_iou2[label] for label in range_labels], color='#d75425', marker='s', linestyle='-', linewidth=2)
-# plt.plot(x_positions, [avg_iou3[label] for label in range_labels], color='#52bcec', marker='^', linestyle='-', linewidth=2)
+# ------------------------------------------------------------------
+base = ['#c6d182','#e0c7e3','#ae98b6','#eae0e9','#846e89']
+palette = [base[0],
+           base[4],
+            mcolors.to_hex(np.array(mcolors.to_rgb(base[2])) * 0.8),
+            base[2],
+           mcolors.to_hex(np.array(mcolors.to_rgb(base[3])) * 0.8),
+           base[3],
+            base[1]
+           ]
+
+inputs = [
+    dict(label='Vispro',
+         path='./result/iou_vispros.npy',
+         color=palette[0],      # deep indigo
+         marker='X'),
+
+    dict(label='Baseline UNet',
+         path='./result/iou_unets.npy',
+         color=palette[1],      # rich teal‑green
+         marker='v'),
+
+    dict(label='10x pipeline',
+         path='./result/iou_10xs.npy',
+         color=palette[2],      # warm orange
+         marker='^'),
+
+    dict(label='CircleNet',
+             path='./result/iou_circlenets.npy',
+             color=palette[3],      # fresh olive‑green
+             marker='o'),
+    dict(label='Cellpose',
+             path='./result/iou_cellposes.npy',
+             color=palette[4],      # muted violet
+             marker='D'),
+    dict(label='Hough transform',
+         path='./result/iou_houghs.npy',
+         color=palette[5],      # vivid magenta
+         marker='s'),
+
+
+]
+
+
+# ------------------------------------------------------------------
+# 2)  load percentage once + sort index
+# ------------------------------------------------------------------
+tissue_percentage = np.load('./result/percentage.npy')
+sort_idx = np.argsort(tissue_percentage)
+tissue_percentage = tissue_percentage[sort_idx]
+
+
+# ------------------------------------------------------------------
+# 3)  helper to compute mean IoU in five coverage bands
+# ------------------------------------------------------------------
+ranges = {"=0":(0,0), "0‑10":(0,10), "10‑30":(10,30),
+          "30‑50":(30,50), ">50":(50, np.inf)}
+x_pos  = [0, 5, 20, 40, 75]
+
+def mean_by_range(cov, iou):
+    out={}
+    for k,(lo,hi) in ranges.items():
+        if lo==hi:
+            m = (cov==lo)
+        else:
+            m = (cov>=lo)&(cov<hi)
+        out[k]=iou[m].mean() if m.any() else np.nan
+    return out
+
+# ------------------------------------------------------------------
+# 4)  load IoU arrays, apply sorting, store means
+# ------------------------------------------------------------------
+for d in inputs:
+    arr          = np.load(d['path'])[sort_idx]
+    d['iou']     = arr
+    d['means']   = mean_by_range(tissue_percentage, arr)
+
+# ------------------------------------------------------------------
+# 5)  plotting (everything else below is your original code)
+# ------------------------------------------------------------------
+plt.figure(figsize=(12.7, 5.5))
+plt.grid(True, axis='x')
+
+# scatter + mean curve per method
+for d in inputs:
+    plt.scatter(tissue_percentage, d['iou'],
+                label=d['label'], color=d['color'],
+                marker=d['marker'], s=40)
 
 
 
+    plt.plot(x_pos,
+             [d['means'][r] for r in ranges],
+             color=d['color'], marker=d['marker'],
+             markersize=8, linewidth=2)
 
-
-
-for x, label in zip(x_positions, range_labels):
-    y1 = avg_iou1[label]
-    y2 = avg_iou2[label]
-    y3 = avg_iou3[label]
-    plt.plot([x, x], [y1, y2], color='#501d8a', linestyle='--', linewidth=1)  # Dashed line
-    # plt.text(x, y, f"{label}\n{y:.2f}", ha='center', va='bottom', fontsize=10, color='#501d8a')  # Label
-    plt.plot([x, x], [y2, y3], color='#1c8041', linestyle='--', linewidth=1)  # Dashed line
-    # plt.plot([x, x], [y3, 0], color='#e55709', linestyle='--', linewidth=1)  # Dashed line
-
-plt.plot(x_positions, [avg_iou1[label] for label in range_labels], color='#501d8a', marker='^',markersize=8, linestyle='-', linewidth=2)
-plt.plot(x_positions, [avg_iou2[label] for label in range_labels], color='#1c8041', marker='s',markersize=8, linestyle='-', linewidth=2)
-plt.plot(x_positions, [avg_iou3[label] for label in range_labels], color='#e55709', marker='x',markersize=8,linestyle='-', linewidth=2)
-
-
-
-#
-
-# Customize x-axis and y-axis
+# ----------------- your axis / label / legend block ------------------
 ax = plt.gca()
+
+ax.text(-0.001, 1.013, "   No overlap", fontsize=14, color='black')
+ax.text(2.7, 1.013, "Slight overlap", fontsize=14, color='black')
+ax.text(12.04, 1.013, "Moderate overlap", fontsize=14, color='black')
+ax.text(34.04, 1.013, "High overlap", fontsize=14, color='black')
+ax.text(55.04, 1.013, "Very high overlap", fontsize=14, color='black')
+
 ax.set_xscale('custom_x')
-
-# ax.set_yscale('custom_y')
-
-# Add background color for each interval
-# colors = ['#c6d182','#eae0e9', '#e0c7e3', '#ae98b6', '#846e89']
-# ax.axvspan(-0.05, 0.05, facecolor=colors[0], alpha=0.4, label='No overlapping')
-# ax.axvspan(0.05, 10, facecolor=colors[1], alpha=0.4, label='Slight overlapping')
-# ax.axvspan(10, 30, facecolor=colors[2], alpha=0.4, label='Moderate overlapping')
-# ax.axvspan(30, 50, facecolor=colors[3], alpha=0.4, label='High overlapping')
-# ax.axvspan(50, 100, facecolor=colors[4], alpha=0.4, label='Very high overlapping')
-# ax.text(-0.003, 1.005, "No overlap", fontsize=14, color='black')
-# ax.text(2.7, 1.005, "Slight overlap", fontsize=14, color='black')
-# ax.text(12.04, 1.005, "Moderate overlap", fontsize=14, color='black')
-# ax.text(34.04, 1.005, "High overlap", fontsize=14, color='black')
-# ax.text(55.04, 1.005, "Very high overlap", fontsize=14, color='black')
-
-
-# Set custom x and y ticks with bold font
-# ax.set_xscale('symlog')
 ax.set_xlim(-0.01, 105)
 ax.set_xticks([0, 10, 30, 50, 100])
-# ax.set_xticklabels(["0%","10%", "30%", "50%", "100%"],
-#                    fontsize=16)
-ax.set_xticklabels(["0% ", "10%", "30% ", "50%", "100%"],
-                   fontsize=12)
+ax.set_xticklabels(["0%", "10%", "30%", "50%", "100%"], fontsize=14)
 
+ax.set_yticks([0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0])
+ax.set_yticklabels(['0.2','0.3','0.4','0.5','0.6','0.7','0.8','0.9','1.0'], fontsize=14)
+ax.set_ylim(0, 1)
 
-ax.set_yticks([0.2,0.3,0.4, 0.5,0.6,0.7, 0.8, 0.9, 1.0])
-ax.set_yticklabels(['0.2','0.3','0.4', '0.5','0.6','0.7', '0.8', '0.9', '1.0'], fontsize=16)
+plt.xlabel('Marker overlap proportion with tissue area', fontsize=18)
+plt.ylabel('IoU', fontsize=18)
+ax.legend(loc="lower right", fontsize=12, frameon=True, bbox_to_anchor=(1.0, -0.01))
 
-ax.set_ylim(0.24, 1)
-# Set axis labels and title with bold font
-plt.xlabel('Marker Overlapping Percentage with Tissue Area', fontsize=16)
-plt.ylabel('IoU', fontsize=16)
-
-# Configure the legend with bold font
-ax.legend(loc="lower right", fontsize=12, frameon=True,bbox_to_anchor=(0.98, -0.01))
-
-# Set global font properties for all text in the figure
-plt.rcParams.update({'font.size': 16})
-
-
-plt.savefig('./figures/3.png', dpi=300)
+plt.tight_layout()
+plt.savefig('./figures/4.png', dpi=300)
 plt.show()

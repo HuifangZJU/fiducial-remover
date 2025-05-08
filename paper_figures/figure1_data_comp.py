@@ -106,7 +106,7 @@ outer_colors = [o[3] for o in outer_slices]
 ###########################
 # 3) Plot the Nested Pie
 ###########################
-fig, ax = plt.subplots(figsize=(15, 8))
+fig, ax = plt.subplots(figsize=(10, 8))
 
 # === INNER RING (Species) ===
 # Donut: from radius=0.4 to 0.7 (width=0.3)
@@ -124,6 +124,8 @@ wedges_inner, _ = ax.pie(
 
 ring_mid_radius = 0.28
 for wedge, label in zip(wedges_inner, species_labels):
+
+
     # 1) Find the wedge’s midpoint angle
     angle_deg = midpoint_angle_deg(wedge)
     angle_rad = np.deg2rad(angle_deg)
@@ -133,6 +135,14 @@ for wedge, label in zip(wedges_inner, species_labels):
     y_label = ring_mid_radius * np.sin(angle_rad)
 
     # 3) Place text with any styling you want
+    if label =='Other':
+       x_label= x_label+0.065
+    if 'Homo' in label:
+        y_label = y_label+0.03
+        x_label = x_label +0.06
+    if 'Mus' in label:
+        y_label = y_label-0.03
+        x_label =x_label-0.02
     ax.text(
         x_label,
         y_label,
@@ -142,6 +152,7 @@ for wedge, label in zip(wedges_inner, species_labels):
         fontsize=14,
         fontweight='bold'
     )
+
 # === OUTER RING (Tissues) ===
 # Donut: from radius=0.7 to 1.0 (width=0.3)
 wedges_outer, _ = ax.pie(
@@ -153,7 +164,7 @@ wedges_outer, _ = ax.pie(
     wedgeprops=dict(width=0.35, edgecolor='white')
 )
 
-ax.set_title("Nested Pie: Species (inner) vs Tissue (outer)", fontsize=14)
+# ax.set_title("Nested Pie: Species (inner) vs Tissue (outer)", fontsize=14)
 ax.set_aspect("equal")
 
 
@@ -172,6 +183,13 @@ for wedge, (sp, fraction, label_str, color_rgba, needs_line) in zip(wedges_outer
     x_wedge = r_mid * np.cos(angle_rad)
     y_wedge = r_mid * np.sin(angle_rad)
 
+
+    if 'Xenograft' in label_str:
+        label_str = label_str.split(' ')
+        label_str = label_str[0]+'\n'+label_str[1]+' '+label_str[2]
+
+
+
     if needs_line:
         # We'll draw 2 line segments:
         #  1) wedge center -> "mid" radial point
@@ -184,10 +202,10 @@ for wedge, (sp, fraction, label_str, color_rgba, needs_line) in zip(wedges_outer
 
         # 2) Decide left or right
         if angle_deg > 270 or angle_deg<90:
-            x_text = 0.9
+            x_text = x_mid+0.1
             ha = 'left'
         else:
-            x_text = -0.9
+            x_text = x_mid-0.1
             ha = 'right'
         y_text = y_mid  # keep the same Y to produce a horizontal line
 
@@ -200,8 +218,10 @@ for wedge, (sp, fraction, label_str, color_rgba, needs_line) in zip(wedges_outer
         ax.text(x_text, y_text, label_str, ha=ha, va='center', fontsize=11)
     else:
         # For bigger slices, place text inside the wedge
+        if 'Stomach' in label_str:
+            x_wedge = x_wedge+0.02
         ax.text(x_wedge, y_wedge, label_str, ha='center', va='center', fontsize=11)
 
 plt.tight_layout()
-plt.savefig('./figures/3.png', dpi=300)
+plt.savefig('./figures/3.png', dpi=500)
 plt.show()

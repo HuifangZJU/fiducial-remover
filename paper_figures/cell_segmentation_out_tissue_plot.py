@@ -16,6 +16,8 @@ from shapely.geometry import Polygon, Point
 from scipy import sparse
 from matplotlib.colors import ListedColormap
 from PIL import Image
+import warnings
+warnings.simplefilter('ignore', Image.DecompressionBombWarning)
 import tifffile
 import json
 import cv2
@@ -227,7 +229,7 @@ def generate_spots_mask(path):
 #     return spot_coords, count_diff
 
 
-def plot_cell_count_difference_in_spots_2(adata, cells1, cells2, full_img,full_image_vispro, num_to_plot=20, background=None):
+def plot_cell_count_difference_in_spots_2(adata, cells1, cells2, full_img, num_to_plot=20, background=None):
     """
     Visualizes spot-level cell count differences alongside gene read percentile information,
     and for each of the top spots (by absolute difference) shows a detailed zoomed-in view
@@ -312,10 +314,7 @@ def plot_cell_count_difference_in_spots_2(adata, cells1, cells2, full_img,full_i
         row_end = min(full_height, int(row_center + spot_radius))
         col_start = max(0, int(col_center - spot_radius))
         col_end = min(full_width, int(col_center + spot_radius))
-        sub_img_original = full_img[row_start-1:row_end+1, col_start-1:col_end+1]
-        sub_img_vispro = full_image_vispro[row_start - 1:row_end + 1, col_start - 1:col_end + 1]
-
-
+        sub_img = full_img[row_start-1:row_end+1, col_start-1:col_end+1]
 
         # Select cells (from both sets) falling within the spot area.
         # Using squared Euclidean distance (cells coordinates in [x, y]).
@@ -336,83 +335,66 @@ def plot_cell_count_difference_in_spots_2(adata, cells1, cells2, full_img,full_i
         # axes[0].axis('off')
         # axes[0].invert_yaxis()
         # Define your base colors.
-        # base_colors = [ '#e0c7e3', '#eae0e9', '#ae98b6', '#846e89','#c6d182']
-        #
-        # # Create a discrete colormap from the base colors for UMI percentiles
-        # cmap_base = ListedColormap(base_colors)
-        # # Define boundaries to map UMI percentiles into 5 bins (0-20, 20-40, ... 80-100)
-        # boundaries = [0, 20, 40, 60, 80, 100]
-        # norm = BoundaryNorm(boundaries, cmap_base.N)
-        #
-        # # Create the subplots
-        plt.rcParams.update({'font.size': 16})
-        fig, axes = plt.subplots(1, 3, figsize=(19, 7), gridspec_kw={'width_ratios': [5, 3, 3]})
+        base_colors = [ '#e0c7e3', '#eae0e9', '#ae98b6', '#846e89','#c6d182']
+
+        # Create a discrete colormap from the base colors for UMI percentiles
+        cmap_base = ListedColormap(base_colors)
+        # Define boundaries to map UMI percentiles into 5 bins (0-20, 20-40, ... 80-100)
+        boundaries = [0, 20, 40, 60, 80, 100]
+        norm = BoundaryNorm(boundaries, cmap_base.N)
+
+        # Create the subplots
+        plt.rcParams.update({'font.size': 12})
+        fig, axes = plt.subplots(1, 2, figsize=(14, 7))
 
         # Left Panel: scatter plot of spot positions using discrete colormap
-        # sc = axes[0].scatter(spot_coords[:, 0], spot_coords[:, 1],
-        #                      c=umi_percentiles, cmap=cmap_base, norm=norm, s=30)
-        sc = axes[0].scatter(spot_coords[:, 0], spot_coords[:, 1], c=umi_percentiles, cmap='viridis', s=30)
+        sc = axes[0].scatter(spot_coords[:, 0], spot_coords[:, 1],
+                             c=umi_percentiles, cmap=cmap_base, norm=norm, s=30)
         # Highlight the current spot.
         axes[0].scatter([x_center], [y_center], c='red', s=80, marker='o',
                         edgecolor='red', linewidth=2)
         axes[0].set_title(
-            f"Current Spot UMI Percentile: {umi_percentiles[idx]:.1f}% \n (among all spots)"
+            f"Current Spot UMI Percentile: {umi_percentiles[idx]:.1f}% (among all spots)"
         )
         axes[0].axis('equal')
         axes[0].axis('off')
         axes[0].invert_yaxis()
 
         # Add a colorbar to the left panel.
-        # cbar = fig.colorbar(sc, fraction=0.03, pad=0.04, shrink=0.8)
-        # cbar.set_label("UMI Percentile (%)")
-        cax = fig.add_axes([0.08, 0.08, 0.01, 0.4])  # This places the colorbar on the left side.
-
-        # Now create the colorbar using the cax axis:
-        cbar = fig.colorbar(sc, cax=cax, fraction=0.03, pad=0.04,shrink=0.7)
+        cbar = fig.colorbar(sc, fraction=0.03, pad=0.04, shrink=0.8)
         cbar.set_label("UMI Percentile (%)")
-        cbar.ax.yaxis.set_label_position('left')
-        cbar.ax.yaxis.tick_left()
+
 
         # --- Left Panel: Zoomed-in view of the spot ---
         # Display the image (use background if provided, else sub_img)
         if background is not None:
-            img_orig = axes[1].imshow(background, cmap='gray', alpha=0.5)
-            img_vispro = axes[2].imshow(background, cmap='gray', alpha=0.5)
+            img = axes[1].imshow(background, cmap='gray', alpha=0.5)
         else:
-            img_orig = axes[1].imshow(sub_img_original, cmap='gray')
-            img_vispro = axes[2].imshow(sub_img_vispro, cmap='gray')
+            img = axes[1].imshow(sub_img, cmap='gray')
 
         # Create a Circle patch at the desired center and radius.
         clip_circle = Circle((x_center - col_start, y_center - row_start), spot_radius,
                                transform=axes[1].transData)
         # Set the clip path for the image artist so only the circular region is shown.
-        img_orig.set_clip_path(clip_circle)
-        img_vispro.set_clip_path(clip_circle)
+        img.set_clip_path(clip_circle)
 
         # Optionally, draw the circle boundary (this will be drawn on top of the clipped image).
         circ = Circle((x_center - col_start, y_center - row_start), spot_radius,
                       color='red', fill=False, lw=2)
         axes[1].add_patch(circ)
-        # axes[2].add_patch(circ)
 
         # Plot the cell detection points
         if cells1_adjusted.size > 0:
-            axes[2].scatter(cells1_adjusted[:, 0], cells1_adjusted[:, 1],
+            axes[1].scatter(cells1_adjusted[:, 0], cells1_adjusted[:, 1],
                             c='blue', marker='o', s=200, label='Vispro Detection')
         if cells2_adjusted.size > 0:
             axes[1].scatter(cells2_adjusted[:, 0], cells2_adjusted[:, 1],
                             c='yellow', marker='^', s=200, label='Original Detection')
 
         # Position the legend if needed; adjust bbox_to_anchor for your layout.
-        axes[1].legend(loc='lower center', bbox_to_anchor=(0.5, -0.15))
-        axes[1].set_title(f"Detected Cells in Zoomed-In Spot \n (#Original image = {count2[idx]})")
+        axes[1].legend(loc='upper left', bbox_to_anchor=(0.9, 0.95))
+        axes[1].set_title(f"Detected Cells in Zoomed Spot \n (#Vispro = {count1[idx]}, #Original = {count2[idx]})")
         axes[1].axis('off')
-
-        # Position the legend if needed; adjust bbox_to_anchor for your layout.
-        axes[2].legend(loc='lower center', bbox_to_anchor=(0.5, -0.15))
-        axes[2].set_title(
-            f"Detected Cells in Zoomed-In Spot \n (#Vispro = {count1[idx]})")
-        axes[2].axis('off')
 
         # --- Right Panel: Gene UMI map of spot locations ---
         # Instead of displaying the full tissue image, we show a scatter plot of all tissue spots
@@ -615,6 +597,12 @@ def morphological_closing(binary_mask):
 
     return opened_mask
 
+def get_data(path):
+    data = np.load(path)
+    # cell_boundaries = data['boundary']
+    cell_centers = data['center']
+    return cell_centers
+
 imglist = '/home/huifang/workspace/data/imagelists/tiff_img_list.txt'
 annotation_path = '/media/huifang/data/fiducial/annotations/location_annotation/'
 file = open(imglist)
@@ -624,180 +612,55 @@ small_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_
 small_images = open(small_image_path)
 small_images = small_images.readlines()
 
-for i in range(0,20):
-    print(i)
-    # filename = str(i) + '.png'
-    # img = plt.imread(dir_base + filename)
+original_path ="/media/huifang/data/fiducial/temp_result/vispro/cell_segmentation/original/"
+vispro2_path ="/media/huifang/data/fiducial/temp_result/vispro/cell_segmentation/vispro2/"
+
+# for i in range(0,20):
+for i in [5]:
+    if i==7:
+        continue
     line = lines[i].rstrip().split(' ')
     filename = line[0]
     annotation_id = line[1]
     print(annotation_id)
+    test = input()
 
 
 
-    # cells1 = np.load(filename[:-4] + '_recovered_stardist.npy')
-    cells1 = np.load('/media/huifang/data/fiducial/tiff/cleaned_tiff/'+str(i)+'_cleaned_stardist.npy')
-    cells2 = np.load(filename[:-4] + '_stardist.npy')
+    cells_original = get_data(original_path + str(i)+'_original.npz')
+
+
+    # cells_vispro1 = np.load(filename[:-4] + '_recovered_stardist.npy')
+    # cells_vispro2 = np.load('/media/huifang/data/fiducial/tiff/cleaned_tiff/'+str(i)+'_cleaned_stardist.npy')
+    cells_vispro2 = get_data(vispro2_path + str(i) + '_vispro2.npz')
 
 
     small_image = plt.imread(annotation_path+annotation_id+'.png')
 
+
+
+
     big_image = plt.imread(filename)
-    vispro_big_image = plt.imread("/media/huifang/data/fiducial/tiff/cleaned_tiff/"+str(i)+"_cleaned.png")
     tissue_mask = read_labelme_json(annotation_path+annotation_id+'.json', small_image.shape)
-
-    # spot_mask = generate_spots_mask("/media/huifang/data/registration/humanpilot/151673/spatial/")
-    adata = sc.read(
-        "/media/huifang/data/fiducial/data/62_STDS0000025_Heart_data_only/1/V1_Human_Heart_spatial/Human_Heart_10xvisium_processed.h5ad")  # update with your file path
-
-    plot_cell_count_difference_in_spots_2(adata, cells1, cells2, big_image,vispro_big_image,background=None)
-    # plot_cell_count_difference_in_spots("/media/huifang/data/fiducial/data/62_STDS0000025_Heart_data_only/1/V1_Human_Heart_spatial/spatial/", cells1, cells2,big_image, background=None)
-
-
-
-
-
-
-
-
 
     zoom_factors = (big_image.shape[0] / tissue_mask.shape[0], big_image.shape[1] / tissue_mask.shape[1])
     tissue_mask = zoom(tissue_mask, zoom_factors, order=0)
-    # spot_mask = zoom(spot_mask,zoom_factors,order=0)
     tissue_mask = np.transpose(tissue_mask)
-    # mask = plt.imread(filename[:-4] + '_mask.tif')
-    # mask = np.transpose(mask)
-    fiducial_mask = plt.imread(small_images[int(annotation_id)].split(' ')[0][:-4]+'_ground_truth.png')
-    fiducial_mask = fiducial_mask*255
-    fiducial_mask = morphological_closing(fiducial_mask)
-    fiducial_mask = zoom(fiducial_mask,zoom_factors,order=0)
-    fiducial_mask = np.transpose(fiducial_mask)
 
-    # f, a = plt.subplots(1, 3)
-    # a[0].imshow(tissue_mask, cmap='gray')
-    # a[1].imshow(spot_mask, cmap='gray')
-    # a[2].imshow(mask, cmap='gray')
-    # plt.show()
+    # count_original_cells_in_tissue, _ = count_cells_in_mask(cells_original, tissue_mask, 255)
+    count_original_cells_out_tissue, _ = count_cells_in_mask(cells_original, tissue_mask, 0)
 
-    # mask = morphological_closing(mask)
+    # count_vispro1_cells_in_tissue, _ = count_cells_in_mask(cells_vispro1,tissue_mask,255)
+    # count_vispro1_cells_out_tissue, _ = count_cells_in_mask(cells_vispro1, tissue_mask, 0)
 
+    # count_vispro2_cells_in_tissue, _ = count_cells_in_mask(cells_vispro2, tissue_mask, 255)
+    count_vispro2_cells_out_tissue, _ = count_cells_in_mask(cells_vispro2, tissue_mask, 0)
 
-    # f,a = plt.subplots(2,2)
-    # a[0,0].imshow(big_image)
-    # a[0,1].imshow(plt.imread(filename[:-4] + '_recovered.tif'))
-    # a[1,0].imshow(tissue_mask,cmap='binary')
-    # a[1,0].scatter(cells2[:,1],cells2[:,0],s=0.1)
-    # a[1,1].imshow(tissue_mask, cmap='binary')
-    # a[1,1].scatter(cells1[:, 1], cells1[:, 0],s=0.1)
-    # plt.show()
-
-    count_recovered_cells_in_tissue, _ = count_cells_in_mask(cells1,tissue_mask,255)
-    count_recovered_cells_out_tissue, _ = count_cells_in_mask(cells1, tissue_mask, 0)
-    count_original_cells_in_tissue, _ = count_cells_in_mask(cells2, tissue_mask, 255)
-    count_original_cells_out_tissue, _ = count_cells_in_mask(cells2, tissue_mask, 0)
-    # print(count_original_cells_out_tissue)
-    # print(count_recovered_cells_out_tissue)
-    # print(count_original_cells_in_tissue)
-    # print(count_recovered_cells_in_tissue)
-    # test = input()
-
-    in_tissue_increase = count_recovered_cells_in_tissue - count_original_cells_in_tissue
-    out_tissue_increase = count_original_cells_out_tissue - count_recovered_cells_out_tissue
-    # print(count_original_cells_out_tissue)
-    # print(count_recovered_cells_out_tissue)
-    # test = input()
-    overall_increase = cells2.shape[0] - cells1.shape[0]
-    print(f"Number detection out of tissue of original image: {count_original_cells_out_tissue}")
-    print(f"Number detection out of tissue of recovered image: {count_recovered_cells_out_tissue}")
-    print(f"Number detection in tissue of original image: {count_original_cells_in_tissue}")
-    print(f"Number detection in tissue of recovered image: {count_recovered_cells_in_tissue}")
-    # print(f"Increased detection out of tissue: {out_tissue_increase}")
-    # print(f"Increased detection in tissue: {in_tissue_increase}")
-    # test = input()
-    # test = input()
-    percent_diff_tissue = in_tissue_increase / count_original_cells_in_tissue * 100
-    percent_diff_non_tissue = out_tissue_increase / count_original_cells_out_tissue * 100
-
-    # Print results
-    # percent_overall_increase = overall_increase / cells1.shape[0] * 100
-    # print(f"Percentage increased detection: {percent_overall_increase:.2f}%")
-    #
-    # print(f"Percentage difference in tissue area: {percent_diff_tissue:.2f}%")
-    #
-    print(f"Percentage difference in tissue area: {percent_diff_tissue:.2f}%")
-    test = input()
-    continue
-
-
-
-    # f,a = plt.subplots(1,2)
-    # a[0].imshow(tissue_mask,cmap='binary')
-    # a[1].imshow(mask,cmap='binary')
-    # plt.show()
-
-    # Count cells in mask areas
-    count_recovered_cells_in_tissue_in_fiducial,_ = count_cells_in_2mask(cells1, tissue_mask, fiducial_mask,255,255)
-    count_original_cells_in_tissue_in_fiducial,_ = count_cells_in_2mask(cells2,  tissue_mask, fiducial_mask,255,255)
-    count_recovered_cells_in_tissue_out_fiducial, _ = count_cells_in_2mask(cells1, tissue_mask, fiducial_mask, 255, 0)
-    count_original_cells_in_tissue_out_fiducial, _ = count_cells_in_2mask(cells2, tissue_mask, fiducial_mask, 255, 0)
-    print(count_recovered_cells_in_tissue_in_fiducial)
-    print(count_original_cells_in_tissue_in_fiducial)
-    print(count_recovered_cells_in_tissue_out_fiducial)
-    print(count_original_cells_in_tissue_out_fiducial)
-    # test = input()
-    # plt.scatter(cells20[:,0],cells20[:,1])
-    # # plt.scatter(cells11[:,0],cells11[:,1])
-    # plt.show()
-    # print(count_cells1_mask1)
-    # print(count_cells1_mask0)
-    # print(count_cells2_mask1)
-    # print(count_cells2_mask0)
-
-
-    # # Calculate differences
-    # diff_in_tissue_in_fiducial = count_original_cells_in_tissue_in_fiducial - count_recovered_cells_in_tissue_in_fiducial
-    # # Calculate percentages
-    # percent_diff_mask1 = diff_in_tissue_in_fiducial / in_tissue_increase * 100
-    #
-    # # Print results
-    #
-    # # print(f"Increased detection in tissue: {in_tissue_increase}")
-    # print(f"Percentage difference in in-tissue fiducial area: {percent_diff_mask1:.2f}%")
-
-
-    # f, a = plt.subplots(1, 2)
-    # a[0].imshow(img1)
-    # a[1].imshow(img2)
-    # plt.show()
-
-    # f,a = plt.subplots(1,2)
-    # a[0].imshow(img1)
-    # a[1].imshow(img2)
-    # plt.show()
-
-    # test = input()
-    # img1 = plt.imread('/media/huifang/data/fiducial/tiff/recovered_tiff/' + str(i) + '_cleaned_stardist.tif')
-    img1 = plt.imread(filename[:-4] + '_recovered_stardist.tif')
-    img2 = plt.imread(filename[:-4] + '_stardist.tif')
-    # f,a = plt.subplots(2,2)
-    # a[0, 0].imshow(big_image)
-    # a[0, 1].imshow(plt.imread(filename[:-4]+'_recovered.tif'))
-    # a[1,0].imshow(np.flipud(img1))
-    # a[1,1].imshow(np.flipud(img2))
-    # plt.show()
-
-    f,a = plt.subplots(1,2)
-    a[0].imshow(big_image)
-    a[1].imshow(plt.imread(filename[:-4]+'_recovered.tif'))
-    # a[1].imshow(plt.imread('/media/huifang/data/fiducial/tiff/recovered_tiff/' + str(i) + '_cleaned.png'))
-    plt.show()
-    f, a = plt.subplots(1, 2)
-    a[0].imshow(img1)
-    a[1].imshow(img2)
-    plt.show()
-
-
-
+    # print("sample id: " + str(annotation_id) + ", Cells in tissue (original): " + str(count_original_cells_in_tissue) + ", Cells out tissue (original): " + str(
+    #     count_original_cells_out_tissue) + ", Cells in tissue (Vispro1): " + str(count_vispro1_cells_in_tissue) + ", Cells out tissue (Vispro1): " + str(
+    #     count_vispro1_cells_out_tissue) + ", Cells in tissue (Vispro2): " + str(count_vispro2_cells_in_tissue) + ", Cells out tissue (Vispro2): " + str(count_vispro2_cells_out_tissue))
+    print("sample id: " + str(annotation_id) +  ", Cells out tissue (original): " + str(
+        count_original_cells_out_tissue) +  ", Cells out tissue (Vispro2): " + str(count_vispro2_cells_out_tissue))
 
 
 

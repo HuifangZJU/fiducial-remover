@@ -12,6 +12,7 @@ df = df[["Species", "Tissue type", "Conditions", "Number of images"]]
 # --- 2) Categorize the "Conditions" ---
 def condition_category(cond_str):
     c_lower = str(cond_str).lower()
+    # c_lower = str(cond_str)
     if any(x in c_lower for x in ["cancer", "carcinoma", "tumor", "lymphoma"]):
         return "Cancer"
     elif "normal" in c_lower or "control" in c_lower:
@@ -98,8 +99,8 @@ ax.grid(False)          # Turn off radial grid
 ax.set_theta_zero_location("N")  # 0 degrees at "North"/top
 ax.set_theta_direction(-1)       # proceed clockwise
 
-plt.title("Condition Distribution (Smallest Category at Top, Clockwise)",
-          fontsize=16, weight='bold')
+# plt.title("Condition Distribution (Smallest Category at Top, Clockwise)",
+#           fontsize=16, weight='bold')
 plt.tight_layout()
 plt.savefig('./figures/2.png', dpi=300)
 plt.show()

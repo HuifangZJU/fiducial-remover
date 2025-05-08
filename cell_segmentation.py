@@ -70,76 +70,100 @@ def calculate_centroid(coords):
 
 
 
-def run_stardist(img,filename,model):
-    if img.shape[2] == 4:
-        img = img[:, :, :3]
+def run_stardist(img,model):
 
-    # plt.imshow(img)
-    # plt.show()
-    # Percentile normalization of the image
-    # Adjust min_percentile and max_percentile as needed
     min_percentile = 5
     max_percentile = 95
 
     img = normalize(img, min_percentile, max_percentile)
-    plt.imshow(img)
-    plt.show()
+    # plt.imshow(img)
+    # plt.show()
     labels, polys = model.predict_instances_big(img, axes='YXC', block_size=4096, prob_thresh=0.01, nms_thresh=0.001,
                                                 min_overlap=128, context=128, normalizer=None, n_tiles=(4, 4, 1))
+    # labels, polys = model.predict_instances_big(img, axes='YXC', block_size=256, prob_thresh=0.01, nms_thresh=0.001,
+    #                                             min_overlap=32, context=64, normalizer=None, n_tiles=(4, 4, 1))
 
-    # labels, polys = model.predict_instances_big(img, axes='YXC', block_size=1028, prob_thresh=0.01, nms_thresh=0.001,
-    #                                             min_overlap=128, context=128, normalizer=None, n_tiles=(4, 4, 1))
 
-    # Creating a list to store Polygon geometries
     geometries = []
     centroids = []
+    boundaries=[]
     # Iterating through each nuclei in the 'polys' DataFrame
     for nuclei in range(len(polys['coord'])):
         # Extracting coordinates for the current nuclei and converting them to (y, x) format
         coords = [(y, x) for x, y in zip(polys['coord'][nuclei][0], polys['coord'][nuclei][1])]
         centroid = calculate_centroid(coords)
         centroids.append(centroid)
+        boundaries.append(coords)
         # Creating a Polygon geometry from the coordinates
         geometries.append(Polygon(coords))
     centroids_array = np.array(centroids)
+    boundaries_array = np.array(boundaries)
 
     # Save the centroids array to a .npy file
-    np.save(filename[:-4] + '_stardist.npy', centroids_array)
-    # Creating a GeoDataFrame using the Polygon geometries
-    gdf = gpd.GeoDataFrame(geometry=geometries)
-    gdf['id'] = [f"ID_{i + 1}" for i, _ in enumerate(gdf.index)]
-    # Plot the nuclei segmentation
-    # bbox=(x min,y min,x max,y max)
 
-    # Define a single color cmap
-    cmap = ListedColormap(['grey'])
-    # Create Plot
-    plot_mask_and_save_image(title="Region of Interest 1", gdf=gdf, cmap=cmap, img=img)
-    # plot_mask_and_save_image(title="Region of Interest 1", gdf=gdf, cmap=cmap, img=img,
-    #                          output_name=filename[:-4] + '_stardist.tif')
+    # # Creating a GeoDataFrame using the Polygon geometries
+    # gdf = gpd.GeoDataFrame(geometry=geometries)
+    # gdf['id'] = [f"ID_{i + 1}" for i, _ in enumerate(gdf.index)]
+    #
+    # # Define a single color cmap
+    # cmap = ListedColormap(['grey'])
+    # plot_mask_and_save_image(title="Region of Interest 1", gdf=gdf, cmap=cmap, img=img)
+    return centroids_array,boundaries_array,geometries
 
 
-# imglist = '/home/huifang/workspace/data/imagelists/tiff_img_list.txt'
-# file = open(imglist)
-# lines = file.readlines()
-img_folder = '/media/huifang/data/fiducial/tiff/recovered_tiff/'
-model = StarDist2D.from_pretrained('2D_versatile_he')
-for i in range(4,20):
-    print(i)
-    img1 = plt.imread(img_folder + str(i) + '.tif')
-    mask1 = plt.imread(img_folder + str(i) + '_cleaned.png')
-    mask1 = mask1[:, :, 3]
-    mask1[mask1 > 0] = 1
 
-    mean_values = img1[mask1 == 0].mean(axis=0)
-    img_out = np.full_like(img1, fill_value=mean_values)
+def get_vispro_mask(vispro_image_path):
+    mask = plt.imread(vispro_image_path)
+    mask = mask[:, :, 3]
+    mask = (mask > 0.4).astype(float)
+    return mask
+
+def get_vispro_rgb_image(original_image,vispro_image_path):
+    mask = get_vispro_mask(vispro_image_path)
+    background_mean_values = original_image[mask == 0].mean(axis=0)
+    img_out = np.full_like(original_image, fill_value=background_mean_values)
 
     # Apply the mask: keep the values where mask1 is 1
-    img_out[mask1 == 1] = img1[mask1 == 1]
-    run_stardist(img_out,img_folder + str(i) + '_cleaned.png',model)
+    img_out[mask == 1] = original_image[mask == 1]
+    return img_out
 
 
+imglist = '/home/huifang/workspace/data/imagelists/tiff_img_list.txt'
+file = open(imglist)
+lines = file.readlines()
+img_folder = '/media/huifang/data/fiducial/tiff/cleaned_tiff/'
+save_path='/media/huifang/data/fiducial/temp_result/vispro/cell_segmentation/'
+model = StarDist2D.from_pretrained('2D_versatile_he')
+# for i in [3,4,12]:
+# for i in range(0,20):
+for i in [10]:
+    print(i)
+    #
+    # if i in [3,4,12]:
+    #     continue
 
+    # original_image_path = lines[i].split(' ')[0]
+    vispro1_image_path = img_folder + str(i) + '.tif'
+    vispro2_image_path = img_folder + str(i) + '_cleaned.png'
+
+    # original_image = plt.imread(original_image_path)
+    vispro1_image = plt.imread(vispro1_image_path)
+    vispro2_image = get_vispro_rgb_image(vispro1_image,vispro2_image_path)
+
+    plt.imshow(vispro2_image)
+    plt.show()
+
+    # original_image = original_image[3500:4500,1800:3200,:]
+    centroids_array,boundary_array,geometries= run_stardist(vispro2_image,model)
+
+    # gdf = gpd.GeoDataFrame(geometry=geometries)
+    # gdf['id'] = [f"ID_{i + 1}" for i, _ in enumerate(gdf.index)]
+    #
+    # # Define a single color cmap
+    # cmap = ListedColormap(['grey'])
+    # plot_mask_and_save_image(title="Region of Interest 1", gdf=gdf, cmap=cmap, img=original_image)
+
+    np.savez(save_path + str(i)+ '_original.npz', center=centroids_array, boundary=boundary_array)
 
 
 

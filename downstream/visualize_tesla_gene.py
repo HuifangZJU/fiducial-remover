@@ -158,20 +158,12 @@ def readin_tiff(tiff_path,scale):
     resized_img = cv2.resize(img_data_cv, (new_width, new_height), interpolation=cv2.INTER_AREA)
     return resized_img
 
-def readin_png(png_path,scale):
-    img = cv2.imread(png_path)
-
-    # Resize the image to 1/10th of its original dimensions
-    rescaled_img = cv2.resize(img, None, fx=1/scale, fy=1/scale, interpolation=cv2.INTER_AREA)
-
-    return rescaled_img
-
 
 def run_single_sample(counts_file,original_img_file,vispro_img_file):
     # Set the data downsampling scale
-    scale = 1
+    scale = 10
     # Set size of superpixel
-    res = 50
+    res = 20
 
     # Processing transcript data
     counts = sc.read(counts_file)
@@ -185,45 +177,59 @@ def run_single_sample(counts_file,original_img_file,vispro_img_file):
 
     original_img = readin_tiff(original_img_file,scale)
     for i in [1,2,3]:
-        cnt = detect_contour(i,original_img,counts)
+        img,cnt = detect_contour(i,original_img,counts)
         # Note, if the numer of superpixels is too large and take too long, you can increase the res to 100
-
-        enhanced_exp_adata = imputation(img=original_img, raw=counts, cnt=cnt, genes=counts.var.index.tolist(), shape="None",
+        enhanced_exp_adata = imputation(img=img, raw=counts, cnt=cnt, genes=counts.var.index.tolist(), shape="None",
                                               res=res, s=1, k=2, num_nbs=20)
-
         X_dense = enhanced_exp_adata.X  # temporarily convert to dense if it's a sparse matrix
         X_dense[X_dense < 1e-2] = 0
         enhanced_exp_adata.X = csr_matrix(X_dense)
-        enhanced_exp_adata.write_h5ad(counts_file[:-5] + "_res"+str(res*scale)+"_tesla_"+str(i)+".h5ad")
+        enhanced_exp_adata.write_h5ad(counts_file[:-5] + "_res"+str(res)+"_tesla_imputed_"+str(i)+".h5ad")
         print("saved tesla expression data "+str(i))
+
+
+        #visualization a gene
+
+        cnt_color = clr.LinearSegmentedColormap.from_list('magma',
+                                                          ["#000003", "#3b0f6f", "#8c2980", "#f66e5b", "#fd9f6c",
+                                                           "#fbfcbf"], N=256)
+        tls_genes = ["CD4", "CD8A", "CD74", "CD79A", "IL7R", "ITGAE", "CD1D", "CD3D", "CD3E", "CD8B",
+                     "CD19", "CD22", "CD52", "CD79B", "CR2", "CXCL13", "CXCR5", "FCER2", "MS4A1",
+                     "PDCD1", "PTGDS", "TRBC2"]
+        for g in tls_genes:
+            exists = g in counts.var.index
+            if not exists:
+                continue
+            print(g)
+            if issparse(enhanced_exp_adata.X):
+                enhanced_exp_adata.X = enhanced_exp_adata.X.toarray()  # or use .A attribute
+            gene_idx = (enhanced_exp_adata.var.index == g)
+            # Slice out the column (n_obs, 1) for this gene, and make it a dense 1D array
+            expr_array = enhanced_exp_adata.X[:, gene_idx].ravel()
+
+            # Now expr_array is shape (n_obs,) which Pandas can accept
+            enhanced_exp_adata.obs[g] = expr_array
+            fig = sc.pl.scatter(enhanced_exp_adata, alpha=1, x="y", y="x", color=g, color_map=cnt_color, show=False,
+                                size=50)
+            fig.set_aspect('equal', 'box')
+            fig.invert_yaxis()
+            plt.gcf().set_dpi(100)
+            plt.savefig(original_img_file[:-4] + '_' + g + '_imputed_' + str(i) + '.png', dpi=600)
+            # plt.show()
+            del fig
         del enhanced_exp_adata
-    del original_img
-
-    vispro_image = readin_png(vispro_img_file,scale)
-    cnt = detect_contour(1, vispro_image, counts)
-    # Note, if the numer of superpixels is too large and take too long, you can increase the res to 100
-    enhanced_exp_adata = imputation(img=vispro_image, raw=counts, cnt=cnt, genes=counts.var.index.tolist(), shape="None",
-                                    res=res, s=1, k=2, num_nbs=20)
-    X_dense = enhanced_exp_adata.X  # temporarily convert to dense if it's a sparse matrix
-    X_dense[X_dense < 1e-2] = 0
-    enhanced_exp_adata.X = csr_matrix(X_dense)
-    enhanced_exp_adata.write_h5ad(counts_file[:-5] + "_res" + str(res*scale) + "_vispro.h5ad")
-    print("saved vispro expression data ")
 
 
-imglist= "/media/huifang/data/fiducial/tiff_data/data_list.txt"
-# imglist = "/home/huifang/workspace/data/imagelists/human_pilot_tesla.txt"
+# imglist= "/media/huifang/data/fiducial/tiff_data/data_list.txt"
+imglist = "/home/huifang/workspace/data/imagelists/human_pilot_tesla.txt"
 file = open(imglist)
 lines = file.readlines()
 num_files = len(lines)
 # paper figure [1,12,19,18]
-for i in range(0,num_files):
+for i in range(1,num_files):
     print(i)
     line = lines[i]
     line = line.rstrip().split(' ')
-    print(line[0])
-    continue
-
     original_tiff_image = line[0]
     vispro_tiff_image = line[1]
     adata_file_name = line[2]

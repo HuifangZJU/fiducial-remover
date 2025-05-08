@@ -72,46 +72,53 @@ def run(imagepath,dataset_name,circle_likelihood=None,shrink=0.87):
 #                data loading
 # ------------------------------------------
 
-# imagepath = '/home/huifang/workspace/data/humanpilot/'
-# imagepath = '/home/huifang/workspace/data/mouse/'
-root_path = '/home/huifang/workspace/data/fiducial_train/'
-dataset_names = os.listdir(root_path)
-for dataset_name in dataset_names:
-    dataset_name = 'mouse'
-    print('-------------'+dataset_name+'-------------')
-    temp = dataset_name.split('_')
-    if len(temp)>1:
-        he_radius = int(temp[-1])
-    else:
-        he_radius = H_RADIUS
-    image_names= os.listdir(root_path+dataset_name)
-    for image_name in image_names:
-        image_name='posterior_v1'
-        print(image_name+'...')
-        ##### run single image #####
-        image, detected_circles = run(root_path + dataset_name + '/', image_name, circle_likelihood=10)
+# # imagepath = '/home/huifang/workspace/data/humanpilot/'
+# # imagepath = '/home/huifang/workspace/data/mouse/'
+# root_path = '/home/huifang/workspace/data/fiducial_train/'
+# dataset_names = os.listdir(root_path)
+# for dataset_name in dataset_names:
+#     dataset_name = 'mouse'
+#     print('-------------'+dataset_name+'-------------')
+#     temp = dataset_name.split('_')
+#     if len(temp)>1:
+#         he_radius = int(temp[-1])
+#     else:
+#         he_radius = H_RADIUS
+#     image_names= os.listdir(root_path+dataset_name)
+#     for image_name in image_names:
+#         image_name='posterior_v1'
+#         print(image_name+'...')
 
-        ##### run iteratively #####
-        # try:
-        #     image, detected_circles = run(root_path+dataset_name+'/', image_name,circle_likelihood=10)
-        # except:
-        #     print("auto detection failed")
-        #     continue
-        ##### Save to file #####
-        # save_path = root_path+dataset_name+'/'+ image_name+'/masks/'
-        # os.makedirs(save_path,exist_ok=True)
-        #
-        # mask = np.zeros(image.shape[:2])
-        # save_mask_to_file(mask,detected_circles,save_path+'hough_mask_solid_r2',-1)
-        # mask = np.zeros(image.shape[:2])
-        # save_mask_to_file(mask, detected_circles, save_path + 'hough_mask', 1)
-        # mask = np.zeros(image.shape[:2])
-        # save_mask_to_file(mask, detected_circles, save_path + 'hough_mask_w2', 2)
-        # print('done')
-        #####Visualization#####
-        mask = np.ones(image.shape[:2])
-        for circle in detected_circles:
-            cv2.circle(mask, (circle[0], circle[1]), circle[2], 0, 2)
-        plt.imshow(mask,cmap='gray')
-        plt.show()
+test_image_path = '/home/huifang/workspace/data/imagelists/st_trainable_images_final.txt'
+f = open(test_image_path, 'r')
+files = f.readlines()
+f.close()
+num_files = len(files)
+
+for i in range(0, num_files):
+    i = 103
+    start_time = time.time()
+    image_name = files[i]
+    image_name = image_name.split(' ')[0]
+
+    # if not os.path.exists(image_name.split('.')[0] + '_auto_tight.png'):
+    print(i)
+    image = plt.imread(image_name)
+    detected_circles = run_circle_threhold(image, 15, circle_threshold=30, step=5)
+
+    #####Visualization#####
+    mask = np.ones(image.shape[:2],np.uint8)
+    for circle in detected_circles:
+
+        cv2.circle(
+            mask,
+            (int(round(circle[0])), int(round(circle[1]))),
+            int(round(circle[2])),
+            color=255,  # value written to mask
+            thickness=-1,  # filled circle
+            lineType=cv2.LINE_AA
+        )
+    cv2.imwrite(image_name.split('.')[0] + '_auto_tight.png', mask)
+    plt.imshow(mask,cmap='gray')
+    plt.show()
 

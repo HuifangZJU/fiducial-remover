@@ -93,6 +93,9 @@ for i in range(len(lines)):
 
 # Convert percentages to a numpy array for easier processing
 percentages = np.array(percentages)
+# np.save("overlapping_rate.npy",percentages)
+# print("saved")
+# test = input()
 
 # Define the conditions for each range
 counts = [

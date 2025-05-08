@@ -363,20 +363,21 @@ def match_cluster_labels(true_labels, est_labels):
         return np.array(l)
 
 
-def cluster_adata(adata, n_clusters=7, sample_name='', use_nmf=False):
+def cluster_adata(adata_copy, n_clusters=7, sample_name='', use_nmf=False,visualization=True):
 
-
-    adata_copy = adata.copy()
     sc.pp.normalize_total(adata_copy, inplace=True)
     sc.pp.log1p(adata_copy)
     sc.pp.highly_variable_genes(adata_copy, flavor="seurat", n_top_genes=2000)
-    sc.pp.pca(adata_copy)
+    sc.pp.pca(adata_copy, n_comps=500)
 
     if use_nmf:
         model = sklearn.decomposition.NMF(n_components=50)
         adata_copy.obsm['X_pca'] = model.fit_transform(adata_copy.X)
 
     cluster_labels = KMeans(n_clusters=n_clusters, random_state=0, n_init=500).fit_predict(adata_copy.obsm['X_pca'])
+
+    # Save cluster labels back to AnnData
+    adata_copy.obs['kmeans_clusters'] = pd.Categorical(cluster_labels.astype(str))
 
 
     # adata_copy.obs['my_clusters'] = pd.Series(
@@ -387,37 +388,38 @@ def cluster_adata(adata, n_clusters=7, sample_name='', use_nmf=False):
     # print('ARI', ari)
     # adata.obs['my_clusters'] = adata_copy.obs['my_clusters'].copy()
 
+    if visualization:
+        if "pixel_x" in adata_copy.obs and "pixel_y" in adata_copy.obs:
+            coords = np.column_stack((adata_copy.obs["pixel_x"], adata_copy.obs["pixel_y"]))
+            adata_copy.obsm["spatial"] = coords
+        if "x" in adata_copy.obs and "y" in adata_copy.obs:
+            coords = np.column_stack((adata_copy.obs["x"], adata_copy.obs["y"]))
+            adata_copy.obsm["spatial"] = coords
 
-    if "pixel_x" in adata_copy.obs and "pixel_y" in adata_copy.obs:
-        coords = np.column_stack((adata_copy.obs["pixel_x"], adata_copy.obs["pixel_y"]))
-        adata_copy.obsm["spatial"] = coords
-    if "x" in adata_copy.obs and "y" in adata_copy.obs:
-        coords = np.column_stack((adata_copy.obs["x"], adata_copy.obs["y"]))
-        adata_copy.obsm["spatial"] = coords
 
+        # Get the spatial coordinates (typically [x, y])
+        spatial_coords = adata_copy.obsm["spatial"]
 
-    # Get the spatial coordinates (typically [x, y])
-    spatial_coords = adata_copy.obsm["spatial"]
+        num_clusters = len(np.unique(cluster_labels))
 
-    num_clusters = len(np.unique(cluster_labels))
+        # Generate a discrete color palette using seaborn.
+        palette = sns.color_palette("tab20", n_colors=num_clusters)
+        # Create a ListedColormap from the generated palette.
+        cmap = mcolors.ListedColormap(palette)
 
-    # Generate a discrete color palette using seaborn.
-    palette = sns.color_palette("tab20", n_colors=num_clusters)
-    # Create a ListedColormap from the generated palette.
-    cmap = mcolors.ListedColormap(palette)
+        plt.figure(figsize=(10, 10))
+        plt.scatter(spatial_coords[:, 1], spatial_coords[:, 0],
+                    c=cluster_labels, cmap=cmap, s=3)
+        plt.xlabel("X Coordinate")
+        plt.ylabel("Y Coordinate")
+        plt.title("Spatial Distribution of Clusters")
+        # Optionally invert the y-axis if your origin is top-left
+        plt.gca().invert_yaxis()
+        plt.axis('equal')
+        plt.colorbar(label="Cluster")
 
-    plt.figure(figsize=(10, 10))
-    plt.scatter(spatial_coords[:, 1], spatial_coords[:, 0],
-                c=cluster_labels, cmap=cmap, s=30)
-    plt.xlabel("X Coordinate")
-    plt.ylabel("Y Coordinate")
-    plt.title("Spatial Distribution of Clusters")
-    # Optionally invert the y-axis if your origin is top-left
-    plt.gca().invert_yaxis()
-    plt.axis('equal')
-    plt.colorbar(label="Cluster")
-    plt.show()
-    return adata
+        plt.show()
+    return adata_copy
 
 
 plt.rcParams.update({'font.size': 22})
@@ -688,12 +690,13 @@ def compare_fused_expression(A, B, fused, gene):
 # plt.colorbar(label="Cluster")
 # plt.show()
 
-fused_slice_vispro = sc.read_h5ad("/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix.h5ad")
+adata = sc.read_h5ad("/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix.h5ad")
 
 
 
-fused_slice_vispro = cluster_adata(fused_slice_vispro, 7, sample_name="151671")
+adata_with_clusters = cluster_adata(adata, 7, sample_name="151671")
 
+adata_with_clusters.write_h5ad("/media/huifang/data/fiducial/tiff_data/151673/filtered_matrix_with_clusters.h5ad")
 
 #
 # draw_spatial(fused_slice_vispro, 'my_clusters',

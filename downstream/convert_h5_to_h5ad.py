@@ -53,8 +53,17 @@ for i in range(13,num_files):
     adata_file_name = line[1]
     spatial_file_name = line[3]
 
+
     # print(adata_file_name)
     # print(spatial_file_name)
     # test = input()
+    # print(adata_file_name)
+    # print(spatial_file_name)
+    # test = input()
+    adata_file_name ="/media/huifang/data/fiducial/data/Visium_Human_Breast_Cancer_spatial/Visium_Human_Breast_Cancer_filtered_feature_bc_matrix.h5"
+    spatial_file_name = "/media/huifang/data/fiducial/data/Visium_Human_Breast_Cancer_spatial/spatial/tissue_positions_list.csv"
+
     run_single_sample(adata_file_name,spatial_file_name)
+    print('done')
+    test = input()
 
